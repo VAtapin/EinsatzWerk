@@ -49,6 +49,49 @@ class CallIntakeApiTest extends TestCase
             ->assertJsonPath('data.0.assets.0.serial_number', '21087465123');
     }
 
+    public function test_customer_master_data_is_scoped_and_contains_the_work_history(): void
+    {
+        $organization = Organization::query()->create(['name' => 'EinsatzWerk Demo']);
+        $otherOrganization = Organization::query()->create([
+            'name' => 'Other Tenant',
+            'slug' => 'other',
+        ]);
+        $this->signIn($organization);
+        $customer = $this->customer($organization->id, 'K-10041', 'Müller', '55176');
+        $foreignCustomer = $this->customer($otherOrganization->id, 'K-90001', 'Müller', '99999');
+        $asset = $customer->assets()->create([
+            'organization_id' => $organization->id,
+            'service_location_id' => $customer->serviceLocations()->firstOrFail()->id,
+            'model' => 'ecoTEC plus',
+            'serial_number' => '21087465123',
+            'status' => 'active',
+        ]);
+        $order = $customer->serviceOrders()->create([
+            'organization_id' => $organization->id,
+            'order_number' => 'A-20260717-001',
+            'service_location_id' => $customer->serviceLocations()->firstOrFail()->id,
+            'asset_id' => $asset->id,
+            'fault_description' => 'Heizung wird nicht warm.',
+            'status' => 'completed',
+        ]);
+
+        $this->getJson('/api/v1/customers?q=55176')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $customer->id)
+            ->assertJsonPath('data.0.assets_count', 1)
+            ->assertJsonPath('data.0.service_orders_count', 1);
+
+        $this->getJson("/api/v1/customers/{$customer->id}")
+            ->assertOk()
+            ->assertJsonPath('data.assets.0.id', $asset->id)
+            ->assertJsonPath('data.service_orders.0.id', $order->id)
+            ->assertJsonPath('data.primary_phone', '55176');
+
+        $this->getJson("/api/v1/customers/{$foreignCustomer->id}")
+            ->assertNotFound();
+    }
+
     public function test_dispatcher_can_create_an_order_with_an_appointment_window(): void
     {
         $organization = Organization::query()->create(['name' => 'EinsatzWerk Demo']);

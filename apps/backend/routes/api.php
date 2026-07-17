@@ -19,7 +19,9 @@ Route::prefix('v1')->group(function (): void {
         Route::post('auth/logout', [AuthController::class, 'logout']);
         Route::middleware('ability:office')->group(function (): void {
             Route::get('customers/search', CustomerSearchController::class);
+            Route::get('customers', [CustomerController::class, 'index']);
             Route::post('customers', [CustomerController::class, 'store']);
+            Route::get('customers/{customer}', [CustomerController::class, 'show']);
             Route::post('customers/{customer}/assets', [CustomerAssetController::class, 'store']);
             Route::get('service-orders', [ServiceOrderController::class, 'index']);
             Route::post('service-orders', [ServiceOrderController::class, 'store']);

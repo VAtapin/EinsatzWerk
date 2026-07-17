@@ -27,4 +27,14 @@ class Asset extends Model
     {
         return $this->belongsTo(Manufacturer::class);
     }
+
+    public function customer(): BelongsTo
+    {
+        return $this->belongsTo(Customer::class);
+    }
+
+    public function serviceLocation(): BelongsTo
+    {
+        return $this->belongsTo(ServiceLocation::class);
+    }
 }

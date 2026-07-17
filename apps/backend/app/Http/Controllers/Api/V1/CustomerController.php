@@ -10,6 +10,74 @@ use Illuminate\Support\Facades\DB;
 
 class CustomerController extends Controller
 {
+    public function index(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'q' => ['nullable', 'string', 'max:255'],
+            'status' => ['nullable', 'string', 'in:active,inactive'],
+            'limit' => ['nullable', 'integer', 'min:1', 'max:100'],
+        ]);
+        $query = trim((string) ($validated['q'] ?? ''));
+        $customers = Customer::query()
+            ->where('organization_id', $request->user()->organization_id)
+            ->when($validated['status'] ?? null, fn ($builder, $status) => $builder->where('status', $status))
+            ->when($query !== '', function ($builder) use ($query): void {
+                $like = '%'.$query.'%';
+                $builder->where(function ($builder) use ($like): void {
+                    $builder
+                        ->whereLike('customer_number', $like)
+                        ->orWhereLike('legacy_customer_number', $like)
+                        ->orWhereLike('first_name', $like)
+                        ->orWhereLike('last_name', $like)
+                        ->orWhereLike('company_name', $like)
+                        ->orWhereLike('primary_phone', $like)
+                        ->orWhereLike('secondary_phone', $like)
+                        ->orWhereLike('email', $like)
+                        ->orWhereHas('serviceLocations', fn ($locations) => $locations
+                            ->whereLike('street', $like)
+                            ->orWhereLike('postal_code', $like)
+                            ->orWhereLike('city', $like));
+                });
+            })
+            ->with([
+                'serviceLocations' => fn ($builder) => $builder
+                    ->orderByDesc('is_primary')
+                    ->oldest(),
+            ])
+            ->withCount(['assets', 'serviceOrders'])
+            ->orderBy('last_name')
+            ->orderBy('first_name')
+            ->limit($validated['limit'] ?? 50)
+            ->get();
+
+        return response()->json(['data' => $customers]);
+    }
+
+    public function show(Request $request, string $customer): JsonResponse
+    {
+        $customer = Customer::query()
+            ->where('organization_id', $request->user()->organization_id)
+            ->with([
+                'serviceLocations' => fn ($builder) => $builder
+                    ->orderByDesc('is_primary')
+                    ->oldest(),
+                'assets' => fn ($builder) => $builder
+                    ->with(['manufacturer:id,name', 'serviceLocation'])
+                    ->orderByRaw("CASE status WHEN 'active' THEN 1 ELSE 2 END")
+                    ->latest(),
+                'serviceOrders' => fn ($builder) => $builder
+                    ->with(['asset:id,model,serial_number', 'serviceLocation'])
+                    ->latest()
+                    ->limit(10),
+                'commercialDocuments' => fn ($builder) => $builder
+                    ->latest('document_date')
+                    ->limit(10),
+            ])
+            ->findOrFail($customer);
+
+        return response()->json(['data' => $customer]);
+    }
+
     public function store(Request $request): JsonResponse
     {
         $validated = $request->validate([
