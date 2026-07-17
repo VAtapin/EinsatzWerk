@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\V1\CustomerAssetController;
 use App\Http\Controllers\Api\V1\CustomerController;
 use App\Http\Controllers\Api\V1\CustomerSearchController;
 use App\Http\Controllers\Api\V1\DispatchController;
+use App\Http\Controllers\Api\V1\OfficeShellController;
 use App\Http\Controllers\Api\V1\PartRequirementController;
 use App\Http\Controllers\Api\V1\ServiceOrderController;
 use App\Http\Controllers\Api\V1\TechnicianVisitController;
@@ -18,6 +19,8 @@ Route::prefix('v1')->group(function (): void {
         Route::get('auth/me', [AuthController::class, 'me']);
         Route::post('auth/logout', [AuthController::class, 'logout']);
         Route::middleware('ability:office')->group(function (): void {
+            Route::get('office/search', [OfficeShellController::class, 'search']);
+            Route::get('office/notifications', [OfficeShellController::class, 'notifications']);
             Route::get('customers/search', CustomerSearchController::class);
             Route::get('customers', [CustomerController::class, 'index']);
             Route::post('customers', [CustomerController::class, 'store']);
