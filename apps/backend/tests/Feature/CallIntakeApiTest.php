@@ -108,6 +108,42 @@ class CallIntakeApiTest extends TestCase
         ]);
     }
 
+    public function test_dispatcher_can_create_a_customer_without_phone_normalization(): void
+    {
+        $organization = Organization::query()->create(['name' => 'EinsatzWerk Demo']);
+        $this->signIn($organization);
+
+        $response = $this->postJson('/api/v1/customers', [
+            'first_name' => 'Petra',
+            'last_name' => 'Neumann',
+            'primary_phone' => '55176',
+            'email' => 'petra@example.test',
+            'street' => 'Am Markt',
+            'house_number' => '3',
+            'postal_code' => '16303',
+            'city' => 'Schwedt/Oder',
+        ]);
+
+        $response
+            ->assertCreated()
+            ->assertJsonPath('data.display_name', 'Petra Neumann')
+            ->assertJsonPath('data.primary_phone', '55176')
+            ->assertJsonPath('data.location.postal_code', '16303');
+        $this->assertMatchesRegularExpression(
+            '/^K-\d{8}-001$/',
+            $response->json('data.customer_number'),
+        );
+        $this->assertDatabaseHas('customers', [
+            'organization_id' => $organization->id,
+            'primary_phone' => '55176',
+        ]);
+        $this->assertDatabaseHas('service_locations', [
+            'customer_id' => $response->json('data.id'),
+            'postal_code' => '16303',
+            'is_primary' => true,
+        ]);
+    }
+
     public function test_location_from_another_customer_cannot_be_used_for_an_order(): void
     {
         $organization = Organization::query()->create(['name' => 'EinsatzWerk Demo']);

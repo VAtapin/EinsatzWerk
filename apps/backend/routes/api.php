@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\V1\AuthController;
+use App\Http\Controllers\Api\V1\CustomerController;
 use App\Http\Controllers\Api\V1\CustomerSearchController;
 use App\Http\Controllers\Api\V1\ServiceOrderController;
 use App\Http\Controllers\Api\V1\TechnicianVisitController;
@@ -15,6 +16,7 @@ Route::prefix('v1')->group(function (): void {
         Route::post('auth/logout', [AuthController::class, 'logout']);
         Route::middleware('ability:office')->group(function (): void {
             Route::get('customers/search', CustomerSearchController::class);
+            Route::post('customers', [CustomerController::class, 'store']);
             Route::get('service-orders', [ServiceOrderController::class, 'index']);
             Route::post('service-orders', [ServiceOrderController::class, 'store']);
             Route::get('service-orders/{serviceOrder}', [ServiceOrderController::class, 'show']);

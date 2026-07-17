@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { type FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   CalendarDays,
@@ -99,6 +99,18 @@ export default function CallIntakePage() {
   const [customerMessage, setCustomerMessage] = useState('');
   const [dispatcherNotes, setDispatcherNotes] = useState('');
   const [saving, setSaving] = useState(false);
+  const [showNewCustomer, setShowNewCustomer] = useState(false);
+  const [creatingCustomer, setCreatingCustomer] = useState(false);
+  const [newCustomer, setNewCustomer] = useState({
+    first_name: '',
+    last_name: '',
+    primary_phone: '',
+    email: '',
+    street: '',
+    house_number: '',
+    postal_code: '',
+    city: '',
+  });
   const selectedCustomer =
     customers.find((customer) => customer.id === customerId) ??
     customers[0] ??
@@ -166,6 +178,38 @@ export default function CallIntakePage() {
       toast.error('Der Auftrag konnte nicht angelegt werden.');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function createCustomer(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setCreatingCustomer(true);
+
+    try {
+      const result = await apiRequest<{ data: Customer }>('/customers', {
+        method: 'POST',
+        body: JSON.stringify(newCustomer),
+      });
+      setCustomers((current) => [result.data, ...current]);
+      setCustomerId(result.data.id);
+      setShowNewCustomer(false);
+      setNewCustomer({
+        first_name: '',
+        last_name: '',
+        primary_phone: '',
+        email: '',
+        street: '',
+        house_number: '',
+        postal_code: '',
+        city: '',
+      });
+      toast.success(
+        `Kunde ${result.data.customer_number} wurde angelegt und ausgewählt.`,
+      );
+    } catch {
+      toast.error('Der Kunde konnte nicht angelegt werden.');
+    } finally {
+      setCreatingCustomer(false);
     }
   }
 
@@ -238,7 +282,10 @@ export default function CallIntakePage() {
             ))}
           </div>
           <div className="mt-4 grid grid-cols-2 gap-2">
-            <button className="flex h-10 items-center justify-center gap-2 rounded-lg border text-sm hover:bg-slate-50">
+            <button
+              onClick={() => setShowNewCustomer(true)}
+              className="flex h-10 items-center justify-center gap-2 rounded-lg border text-sm hover:bg-slate-50"
+            >
               <Plus className="size-4" /> Neuer Kunde
             </button>
             <button className="flex h-10 items-center justify-center gap-2 rounded-lg border text-sm hover:bg-slate-50">
@@ -500,6 +547,78 @@ export default function CallIntakePage() {
           <Check className="size-5" />
         </button>
       </div>
+
+      {showNewCustomer && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-6">
+          <form
+            onSubmit={createCustomer}
+            className="w-full max-w-2xl rounded-2xl bg-white shadow-2xl"
+          >
+            <div className="flex items-center justify-between border-b px-6 py-4">
+              <div>
+                <h2 className="text-lg font-bold">Neuer Kunde</h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Kundendaten und erste Serviceadresse erfassen
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowNewCustomer(false)}
+                className="rounded-lg px-3 py-2 text-sm hover:bg-slate-100"
+              >
+                Schließen
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-4 p-6">
+              {[
+                ['first_name', 'Vorname', false],
+                ['last_name', 'Nachname', true],
+                ['primary_phone', 'Telefon', true],
+                ['email', 'E-Mail', false],
+                ['street', 'Straße', false],
+                ['house_number', 'Hausnummer', false],
+                ['postal_code', 'PLZ', true],
+                ['city', 'Ort', true],
+              ].map(([field, label, required]) => (
+                <label key={field as string} className="text-sm">
+                  <span className="mb-1.5 block font-medium">
+                    {label as string}
+                  </span>
+                  <input
+                    required={required as boolean}
+                    type={field === 'email' ? 'email' : 'text'}
+                    value={
+                      newCustomer[field as keyof typeof newCustomer] as string
+                    }
+                    onChange={(event) =>
+                      setNewCustomer((current) => ({
+                        ...current,
+                        [field as string]: event.target.value,
+                      }))
+                    }
+                    className="h-11 w-full rounded-lg border border-slate-200 px-3 outline-none focus:border-[#ff5a0a]"
+                  />
+                </label>
+              ))}
+            </div>
+            <div className="flex justify-end gap-3 border-t px-6 py-4">
+              <button
+                type="button"
+                onClick={() => setShowNewCustomer(false)}
+                className="h-11 rounded-lg border px-5 text-sm font-semibold"
+              >
+                Abbrechen
+              </button>
+              <button
+                disabled={creatingCustomer}
+                className="h-11 rounded-lg bg-[#ff5a0a] px-6 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                {creatingCustomer ? 'Wird angelegt…' : 'Kunde anlegen'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }
