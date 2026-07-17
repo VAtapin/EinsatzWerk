@@ -38,7 +38,12 @@ class CustomerSearchController extends Controller
                         });
                 });
             })
-            ->with(['serviceLocations' => fn ($builder) => $builder->where('is_primary', true)])
+            ->with([
+                'serviceLocations' => fn ($builder) => $builder->where('is_primary', true),
+                'assets' => fn ($builder) => $builder
+                    ->where('status', 'active')
+                    ->latest('purchase_date'),
+            ])
             ->orderBy('last_name')
             ->limit(20)
             ->get();
@@ -55,6 +60,7 @@ class CustomerSearchController extends Controller
                 'company_name' => $customer->company_name,
                 'primary_phone' => $customer->primary_phone,
                 'location' => $customer->serviceLocations->first(),
+                'assets' => $customer->assets,
             ]),
         ]);
     }

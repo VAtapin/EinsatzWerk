@@ -34,4 +34,9 @@ class Customer extends Model
     {
         return $this->hasMany(ServiceOrder::class);
     }
+
+    public function assets(): HasMany
+    {
+        return $this->hasMany(Asset::class);
+    }
 }

@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Models\Asset;
 use App\Models\ServiceLocation;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -61,6 +62,20 @@ class StoreServiceOrderRequest extends FormRequest
                         'service_location_id',
                         'The service location must belong to the selected customer.',
                     );
+                }
+
+                if ($this->filled('asset_id')) {
+                    $assetBelongsToCustomer = Asset::query()
+                        ->whereKey($this->input('asset_id'))
+                        ->where('customer_id', $this->input('customer_id'))
+                        ->exists();
+
+                    if (! $assetBelongsToCustomer) {
+                        $validator->errors()->add(
+                            'asset_id',
+                            'The asset must belong to the selected customer.',
+                        );
+                    }
                 }
             },
         ];

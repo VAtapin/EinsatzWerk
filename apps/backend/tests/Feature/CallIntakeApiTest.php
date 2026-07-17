@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Asset;
 use App\Models\Customer;
 use App\Models\Organization;
 use App\Models\ServiceLocation;
@@ -24,6 +25,13 @@ class CallIntakeApiTest extends TestCase
         $this->signIn($organization);
 
         $visible = $this->customer($organization->id, 'K-10041', 'Müller', '03332 123456');
+        $asset = $visible->assets()->create([
+            'organization_id' => $organization->id,
+            'service_location_id' => $visible->serviceLocations()->firstOrFail()->id,
+            'model' => 'ecoTEC plus',
+            'serial_number' => '21087465123',
+            'status' => 'active',
+        ]);
         $this->customer($otherOrganization->id, 'K-90001', 'Müller', '030 999999');
 
         $response = $this
@@ -34,7 +42,9 @@ class CallIntakeApiTest extends TestCase
             ->assertOk()
             ->assertJsonCount(1, 'data')
             ->assertJsonPath('data.0.id', $visible->id)
-            ->assertJsonPath('data.0.primary_phone', '03332 123456');
+            ->assertJsonPath('data.0.primary_phone', '03332 123456')
+            ->assertJsonPath('data.0.assets.0.id', $asset->id)
+            ->assertJsonPath('data.0.assets.0.serial_number', '21087465123');
     }
 
     public function test_dispatcher_can_create_an_order_with_an_appointment_window(): void
@@ -48,12 +58,20 @@ class CallIntakeApiTest extends TestCase
             '03332 123456',
         );
         $location = $customer->serviceLocations()->firstOrFail();
+        $asset = $customer->assets()->create([
+            'organization_id' => $organization->id,
+            'service_location_id' => $location->id,
+            'model' => 'ecoTEC plus',
+            'serial_number' => '21087465123',
+            'status' => 'active',
+        ]);
 
         $response = $this
             ->withHeader('X-Organization-ID', $organization->id)
             ->postJson('/api/v1/service-orders', [
                 'customer_id' => $customer->id,
                 'service_location_id' => $location->id,
+                'asset_id' => $asset->id,
                 'priority' => 'high',
                 'fault_description' => 'Heizung wird nicht warm.',
                 'appointment' => [
@@ -66,11 +84,13 @@ class CallIntakeApiTest extends TestCase
         $response
             ->assertCreated()
             ->assertJsonPath('data.customer_id', $customer->id)
+            ->assertJsonPath('data.asset_id', $asset->id)
             ->assertJsonPath('data.status', 'awaiting_scheduling');
 
         $this->assertDatabaseHas('service_orders', [
             'organization_id' => $organization->id,
             'customer_id' => $customer->id,
+            'asset_id' => $asset->id,
             'priority' => 'high',
             'source' => 'phone',
         ]);
@@ -99,6 +119,34 @@ class CallIntakeApiTest extends TestCase
             ]);
 
         $response->assertUnprocessable()->assertJsonValidationErrors('service_location_id');
+    }
+
+    public function test_asset_from_another_customer_cannot_be_used_for_an_order(): void
+    {
+        $organization = Organization::query()->create(['name' => 'EinsatzWerk Demo']);
+        $this->signIn($organization);
+        $customer = $this->customer($organization->id, 'K-10041', 'Müller', '03332 123456');
+        $otherCustomer = $this->customer($organization->id, 'K-10042', 'Schmidt', '03332 987654');
+        $foreignAsset = Asset::query()->create([
+            'organization_id' => $organization->id,
+            'customer_id' => $otherCustomer->id,
+            'service_location_id' => $otherCustomer->serviceLocations()->firstOrFail()->id,
+            'model' => 'Fremdes Gerät',
+            'serial_number' => 'RAW-0001',
+            'status' => 'active',
+        ]);
+
+        $response = $this
+            ->withHeader('X-Organization-ID', $organization->id)
+            ->postJson('/api/v1/service-orders', [
+                'customer_id' => $customer->id,
+                'service_location_id' => $customer->serviceLocations()->firstOrFail()->id,
+                'asset_id' => $foreignAsset->id,
+                'priority' => 'normal',
+                'fault_description' => 'Test',
+            ]);
+
+        $response->assertUnprocessable()->assertJsonValidationErrors('asset_id');
     }
 
     public function test_order_numbers_use_a_transactional_daily_sequence(): void

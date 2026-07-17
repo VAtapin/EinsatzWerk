@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Models\Asset;
 use App\Models\CommercialDocument;
 use App\Models\CommercialDocumentLine;
 use App\Models\Customer;
@@ -395,6 +396,29 @@ class ImportLegacyData extends Command
                 ],
             ],
         );
+
+        if ($customer !== null && $data['Seriennummer'] !== '') {
+            $locationId = ServiceLocation::query()
+                ->where('customer_id', $customer->id)
+                ->where('is_primary', true)
+                ->value('id');
+
+            Asset::query()->updateOrCreate(
+                [
+                    'organization_id' => $organization->id,
+                    'customer_id' => $customer->id,
+                    'serial_number' => $data['Seriennummer'],
+                ],
+                [
+                    'service_location_id' => $locationId,
+                    'model' => $data['Bezeichnung'] ?: null,
+                    'purchase_date' => $this->parseDate($data['Datum']),
+                    'status' => 'active',
+                    'legacy_article_id' => $data['Artikelnummer'] ?: null,
+                    'legacy_data' => $data,
+                ],
+            );
+        }
 
         ImportRow::query()->updateOrCreate(
             [

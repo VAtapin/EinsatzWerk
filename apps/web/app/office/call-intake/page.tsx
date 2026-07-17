@@ -26,6 +26,15 @@ type Customer = {
   customer_number: string;
   display_name: string;
   primary_phone: string | null;
+  assets: Array<{
+    id: string;
+    model: string | null;
+    serial_number: string | null;
+    production_number: string | null;
+    purchase_date: string | null;
+    status: string;
+    legacy_article_id: string | null;
+  }>;
   location: {
     id: string;
     street: string | null;
@@ -40,35 +49,9 @@ const emptyCustomer: Customer = {
   customer_number: '',
   display_name: 'Kunde auswählen',
   primary_phone: null,
+  assets: [],
   location: null,
 };
-
-const assets = [
-  {
-    id: 1,
-    name: 'Bosch Waschmaschine',
-    model: 'WAE282ECO',
-    details: 'FD: 9204   SN: 123456789',
-    active: true,
-    emoji: '🧺',
-  },
-  {
-    id: 2,
-    name: 'Siemens Kühlschrank',
-    model: 'KG36NXI30',
-    details: 'FD: 1007   SN: 987654321',
-    active: true,
-    emoji: '🧊',
-  },
-  {
-    id: 3,
-    name: 'Miele Geschirrspüler',
-    model: 'G 6200 SCi',
-    details: 'FD: 1103   SN: 456789123',
-    active: false,
-    emoji: '🍽️',
-  },
-];
 
 const steps = [
   'Kunde finden',
@@ -104,7 +87,7 @@ export default function CallIntakePage() {
   const [query, setQuery] = useState('');
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [customerId, setCustomerId] = useState('');
-  const [assetId, setAssetId] = useState(1);
+  const [assetId, setAssetId] = useState('');
   const [priority, setPriority] = useState('high');
   const [faultDescription, setFaultDescription] = useState(
     'Maschine pumpt nicht ab, Wasser bleibt in der Trommel. Fehler tritt seit gestern Abend auf.',
@@ -114,6 +97,14 @@ export default function CallIntakePage() {
     customers.find((customer) => customer.id === customerId) ??
     customers[0] ??
     emptyCustomer;
+
+  useEffect(() => {
+    setAssetId((current) =>
+      selectedCustomer.assets.some((asset) => asset.id === current)
+        ? current
+        : (selectedCustomer.assets[0]?.id ?? ''),
+    );
+  }, [selectedCustomer]);
 
   useEffect(() => {
     if (!getAccessToken()) {
@@ -157,6 +148,7 @@ export default function CallIntakePage() {
         body: JSON.stringify({
           customer_id: selectedCustomer.id,
           service_location_id: selectedCustomer.location.id,
+          ...(assetId ? { asset_id: assetId } : {}),
           priority,
           fault_description: faultDescription,
         }),
@@ -302,36 +294,54 @@ export default function CallIntakePage() {
                   + Gerät hinzufügen
                 </button>
               </div>
-              {assets.map((asset) => (
-                <button
-                  key={asset.id}
-                  onClick={() => setAssetId(asset.id)}
-                  className={`flex w-full items-center gap-3 border-b px-3 py-2.5 text-left last:border-0 ${
-                    assetId === asset.id ? 'bg-blue-50/70' : 'hover:bg-slate-50'
-                  }`}
-                >
-                  <div className="flex size-11 items-center justify-center rounded-lg bg-slate-100 text-xl">
-                    {asset.emoji}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-semibold">{asset.name}</div>
-                    <div className="text-xs text-slate-500">{asset.model}</div>
-                    <div className="mt-1 text-[11px] text-slate-400">
-                      {asset.details}
-                    </div>
-                  </div>
-                  <span
-                    className={`rounded px-2 py-1 text-[11px] ${
-                      asset.active
-                        ? 'bg-emerald-100 text-emerald-700'
-                        : 'bg-slate-100 text-slate-500'
+              {selectedCustomer.assets.length === 0 ? (
+                <div className="px-4 py-6 text-sm text-slate-500">
+                  <Wrench className="mb-2 size-5 text-slate-400" />
+                  Noch kein Gerät eindeutig zugeordnet. Der Auftrag kann ohne
+                  Gerät angelegt werden.
+                </div>
+              ) : (
+                selectedCustomer.assets.map((asset) => (
+                  <button
+                    key={asset.id}
+                    onClick={() => setAssetId(asset.id)}
+                    className={`flex w-full items-center gap-3 border-b px-3 py-2.5 text-left last:border-0 ${
+                      assetId === asset.id
+                        ? 'bg-blue-50/70'
+                        : 'hover:bg-slate-50'
                     }`}
                   >
-                    {asset.active ? 'Aktiv' : 'Inaktiv'}
-                  </span>
-                  <ChevronRight className="size-4 text-slate-400" />
-                </button>
-              ))}
+                    <div className="flex size-11 items-center justify-center rounded-lg bg-slate-100">
+                      <Wrench className="size-5 text-slate-500" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-semibold">
+                        {asset.model || 'Gerät ohne Modellbezeichnung'}
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        {asset.serial_number
+                          ? `SN: ${asset.serial_number}`
+                          : 'Keine Seriennummer'}
+                      </div>
+                      {asset.production_number && (
+                        <div className="mt-1 text-[11px] text-slate-400">
+                          FD: {asset.production_number}
+                        </div>
+                      )}
+                    </div>
+                    <span
+                      className={`rounded px-2 py-1 text-[11px] ${
+                        asset.status === 'active'
+                          ? 'bg-emerald-100 text-emerald-700'
+                          : 'bg-slate-100 text-slate-500'
+                      }`}
+                    >
+                      {asset.status === 'active' ? 'Aktiv' : 'Inaktiv'}
+                    </span>
+                    <ChevronRight className="size-4 text-slate-400" />
+                  </button>
+                ))
+              )}
             </div>
           </div>
         </Panel>
