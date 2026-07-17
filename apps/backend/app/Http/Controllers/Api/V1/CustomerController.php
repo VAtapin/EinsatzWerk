@@ -25,6 +25,21 @@ class CustomerController extends Controller
             'city' => ['required', 'string', 'max:255'],
         ]);
         $organizationId = $request->user()->organization_id;
+        $duplicate = Customer::query()
+            ->where('organization_id', $organizationId)
+            ->where('primary_phone', $validated['primary_phone'])
+            ->where('last_name', $validated['last_name'])
+            ->whereHas('serviceLocations', fn ($builder) => $builder
+                ->where('postal_code', $validated['postal_code']))
+            ->first();
+
+        if ($duplicate !== null) {
+            return response()->json([
+                'message' => 'Ein möglicher Dubletten-Kunde wurde gefunden.',
+                'duplicate_customer_id' => $duplicate->id,
+                'duplicate_customer_number' => $duplicate->customer_number,
+            ], 409);
+        }
 
         $customer = DB::transaction(function () use ($validated, $organizationId): Customer {
             $sequenceDate = today()->toDateString();

@@ -136,7 +136,15 @@ export default function OrdersPage() {
       );
       setOrders(result.data);
       setSelectedId((current) =>
-        result.data.some((order) => order.id === current)
+        result.data.some(
+          (order) =>
+            order.id ===
+            (typeof window === 'undefined'
+              ? current
+              : new URLSearchParams(window.location.search).get('order')),
+        )
+          ? (new URLSearchParams(window.location.search).get('order') as string)
+          : result.data.some((order) => order.id === current)
           ? current
           : (result.data[0]?.id ?? ''),
       );

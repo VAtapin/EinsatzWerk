@@ -172,6 +172,12 @@ class ServiceOrderController extends Controller
                 ->where('organization_id', $organizationId)
                 ->lockForUpdate()
                 ->findOrFail($serviceOrder);
+            DispatchController::ensureNoConflict(
+                $organizationId,
+                $validated['technician_id'],
+                $validated['planned_start_at'],
+                $validated['planned_end_at'],
+            );
             $from = $order->status;
             $visitNumber = ((int) $order->visits()->max('visit_number')) + 1;
             $visit = $order->visits()->create([

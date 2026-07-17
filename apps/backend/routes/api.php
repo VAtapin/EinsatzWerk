@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\CustomerAssetController;
 use App\Http\Controllers\Api\V1\CustomerController;
 use App\Http\Controllers\Api\V1\CustomerSearchController;
+use App\Http\Controllers\Api\V1\DispatchController;
 use App\Http\Controllers\Api\V1\ServiceOrderController;
 use App\Http\Controllers\Api\V1\TechnicianVisitController;
 use Illuminate\Support\Facades\Route;
@@ -24,6 +25,8 @@ Route::prefix('v1')->group(function (): void {
             Route::get('service-orders/{serviceOrder}', [ServiceOrderController::class, 'show']);
             Route::post('service-orders/{serviceOrder}/assign', [ServiceOrderController::class, 'assign']);
             Route::get('technicians', [ServiceOrderController::class, 'technicians']);
+            Route::get('dispatch/board', [DispatchController::class, 'board']);
+            Route::patch('dispatch/visits/{visit}', [DispatchController::class, 'reschedule']);
         });
 
         Route::prefix('technician')

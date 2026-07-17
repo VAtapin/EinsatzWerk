@@ -92,5 +92,61 @@ class OfficeDispatchWorkflowTest extends TestCase
             'from_status' => 'awaiting_scheduling',
             'to_status' => 'planned',
         ]);
+
+        $this->getJson('/api/v1/dispatch/board?date='.now()->addDay()->toDateString())
+            ->assertOk()
+            ->assertJsonPath('data.technicians.0.assigned_visits.0.service_order.id', $order->id);
+    }
+
+    public function test_dispatcher_cannot_create_overlapping_visits(): void
+    {
+        $organization = Organization::query()->create(['name' => 'EinsatzWerk Demo']);
+        $dispatcher = User::query()->create([
+            'organization_id' => $organization->id,
+            'name' => 'Sabine Becker',
+            'email' => 'sabine@example.test',
+            'role_code' => 'dispatcher',
+            'password' => 'secret',
+        ]);
+        $technician = User::query()->create([
+            'organization_id' => $organization->id,
+            'name' => 'Thomas Becker',
+            'email' => 'thomas@example.test',
+            'role_code' => 'technician',
+            'password' => 'secret',
+        ]);
+        $customer = Customer::query()->create([
+            'organization_id' => $organization->id,
+            'customer_number' => 'K-10041',
+            'last_name' => 'Müller',
+        ]);
+        $location = ServiceLocation::query()->create([
+            'organization_id' => $organization->id,
+            'customer_id' => $customer->id,
+            'postal_code' => '16303',
+            'city' => 'Schwedt/Oder',
+            'is_primary' => true,
+        ]);
+        $orders = collect([1, 2])->map(fn (int $number) => ServiceOrder::query()->create([
+            'organization_id' => $organization->id,
+            'order_number' => "A-20260717-00{$number}",
+            'customer_id' => $customer->id,
+            'service_location_id' => $location->id,
+            'status' => 'awaiting_scheduling',
+            'fault_description' => 'Test',
+        ]));
+        Sanctum::actingAs($dispatcher, ['office']);
+        $start = now()->addDay()->setTime(10, 0);
+        $payload = [
+            'technician_id' => $technician->id,
+            'planned_start_at' => $start->toIso8601String(),
+            'planned_end_at' => $start->copy()->addHour()->toIso8601String(),
+        ];
+
+        $this->postJson("/api/v1/service-orders/{$orders[0]->id}/assign", $payload)
+            ->assertCreated();
+        $this->postJson("/api/v1/service-orders/{$orders[1]->id}/assign", $payload)
+            ->assertUnprocessable()
+            ->assertJsonPath('message', 'Der Techniker hat in diesem Zeitraum bereits einen Einsatz.');
     }
 }

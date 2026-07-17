@@ -169,6 +169,26 @@ class CallIntakeApiTest extends TestCase
         ]);
     }
 
+    public function test_customer_creation_reports_an_exact_duplicate(): void
+    {
+        $organization = Organization::query()->create(['name' => 'EinsatzWerk Demo']);
+        $this->signIn($organization);
+        $existing = $this->customer($organization->id, 'K-10041', 'Müller', '55176');
+
+        $this->postJson('/api/v1/customers', [
+            'first_name' => 'Peter',
+            'last_name' => 'Müller',
+            'primary_phone' => '55176',
+            'postal_code' => '16303',
+            'city' => 'Schwedt/Oder',
+        ])
+            ->assertConflict()
+            ->assertJsonPath('duplicate_customer_id', $existing->id)
+            ->assertJsonPath('duplicate_customer_number', 'K-10041');
+
+        $this->assertDatabaseCount('customers', 1);
+    }
+
     public function test_location_from_another_customer_cannot_be_used_for_an_order(): void
     {
         $organization = Organization::query()->create(['name' => 'EinsatzWerk Demo']);

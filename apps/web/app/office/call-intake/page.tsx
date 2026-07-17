@@ -3,7 +3,6 @@
 import { type FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  CalendarDays,
   Check,
   ChevronRight,
   Clock3,
@@ -100,6 +99,9 @@ export default function CallIntakePage() {
   const [faultDescription, setFaultDescription] = useState('');
   const [customerMessage, setCustomerMessage] = useState('');
   const [dispatcherNotes, setDispatcherNotes] = useState('');
+  const [appointmentStart, setAppointmentStart] = useState('');
+  const [appointmentEnd, setAppointmentEnd] = useState('');
+  const [hardAppointment, setHardAppointment] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showNewCustomer, setShowNewCustomer] = useState(false);
   const [showNewAsset, setShowNewAsset] = useState(false);
@@ -170,7 +172,7 @@ export default function CallIntakePage() {
     setSaving(true);
     try {
       const result = await apiRequest<{
-        data: { order_number: string };
+        data: { id: string; order_number: string };
       }>('/service-orders', {
         method: 'POST',
         body: JSON.stringify({
@@ -181,9 +183,22 @@ export default function CallIntakePage() {
           fault_description: faultDescription,
           customer_message: customerMessage || null,
           dispatcher_notes: dispatcherNotes || null,
+          ...(appointmentStart
+            ? {
+                preferred_date: appointmentStart.slice(0, 10),
+                appointment: {
+                  starts_at: new Date(appointmentStart).toISOString(),
+                  ends_at: appointmentEnd
+                    ? new Date(appointmentEnd).toISOString()
+                    : null,
+                  is_hard: hardAppointment,
+                },
+              }
+            : {}),
         }),
       });
       toast.success(`Auftrag ${result.data.order_number} wurde angelegt.`);
+      router.push(`/office/orders?order=${result.data.id}`);
     } catch {
       toast.error('Der Auftrag konnte nicht angelegt werden.');
     } finally {
@@ -216,8 +231,17 @@ export default function CallIntakePage() {
       toast.success(
         `Kunde ${result.data.customer_number} wurde angelegt und ausgewählt.`,
       );
-    } catch {
-      toast.error('Der Kunde konnte nicht angelegt werden.');
+    } catch (error) {
+      const status = (error as Error & { status?: number }).status;
+      if (status === 409) {
+        setQuery(newCustomer.primary_phone);
+        setShowNewCustomer(false);
+        toast.warning(
+          'Mögliche Dublette gefunden. Der vorhandene Kunde wird gesucht.',
+        );
+      } else {
+        toast.error('Der Kunde konnte nicht angelegt werden.');
+      }
     } finally {
       setCreatingCustomer(false);
     }
@@ -545,14 +569,38 @@ export default function CallIntakePage() {
                 className="min-h-28 w-full rounded-lg border p-3 text-sm outline-none focus:border-[#ff5a0a]"
                 placeholder="Besondere Umstände, Zugang, Parken…"
               />
-              <div className="mt-3 flex gap-2">
-                <button className="flex h-10 items-center gap-2 rounded-lg border px-4 text-sm">
-                  <Phone className="size-4" /> Rückruf vereinbaren
-                </button>
-                <button className="flex h-10 items-center gap-2 rounded-lg border px-4 text-sm">
-                  <CalendarDays className="size-4" /> Terminwunsch
-                </button>
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <label className="text-xs font-medium">
+                  Terminwunsch von
+                  <input
+                    type="datetime-local"
+                    value={appointmentStart}
+                    onChange={(event) =>
+                      setAppointmentStart(event.target.value)
+                    }
+                    className="mt-1 h-10 w-full rounded-lg border px-3 text-sm"
+                  />
+                </label>
+                <label className="text-xs font-medium">
+                  bis
+                  <input
+                    type="datetime-local"
+                    value={appointmentEnd}
+                    min={appointmentStart}
+                    onChange={(event) => setAppointmentEnd(event.target.value)}
+                    className="mt-1 h-10 w-full rounded-lg border px-3 text-sm"
+                  />
+                </label>
               </div>
+              <label className="mt-3 flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={hardAppointment}
+                  onChange={(event) => setHardAppointment(event.target.checked)}
+                  className="accent-[#ff5a0a]"
+                />
+                Fest zugesagter Termin
+              </label>
             </div>
           </div>
         </Panel>

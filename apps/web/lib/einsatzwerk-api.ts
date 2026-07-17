@@ -35,9 +35,14 @@ export async function apiRequest<T>(
     const body = await response.json().catch(() => null);
     const error = new Error(
       body?.message ?? `EinsatzWerk API returned ${response.status}.`,
-    ) as Error & { status?: number; errors?: Record<string, string[]> };
+    ) as Error & {
+      status?: number;
+      errors?: Record<string, string[]>;
+      details?: Record<string, unknown>;
+    };
     error.status = response.status;
     error.errors = body?.errors;
+    error.details = body;
     throw error;
   }
 
