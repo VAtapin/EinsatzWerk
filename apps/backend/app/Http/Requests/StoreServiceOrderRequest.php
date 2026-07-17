@@ -34,6 +34,7 @@ class StoreServiceOrderRequest extends FormRequest
                 Rule::exists('assets', 'id')->where('organization_id', $organizationId),
             ],
             'priority' => ['required', Rule::in(['low', 'normal', 'high', 'urgent'])],
+            'fault_category' => ['required', 'string', 'max:255'],
             'fault_description' => ['required', 'string', 'max:5000'],
             'customer_message' => ['nullable', 'string', 'max:5000'],
             'dispatcher_notes' => ['nullable', 'string', 'max:5000'],

@@ -29,8 +29,12 @@ type Order = {
   priority: string;
   status: string;
   fault_description: string;
+  fault_category: string | null;
+  customer_message: string | null;
+  dispatcher_notes: string | null;
   created_at: string;
   customer: {
+    id: string;
     first_name: string | null;
     last_name: string;
     company_name: string | null;
@@ -54,6 +58,15 @@ type Order = {
   }>;
 };
 
+type OrderDetail = Order & {
+  appointment_constraints: Array<{
+    id: string;
+    starts_at: string;
+    ends_at: string | null;
+    is_hard: boolean;
+  }>;
+};
+
 const statuses = [
   ['', 'Alle'],
   ['awaiting_scheduling', 'Neu'],
@@ -69,6 +82,22 @@ const statusStyle: Record<string, string> = {
   in_progress: 'bg-orange-100 text-orange-700',
   awaiting_parts: 'bg-amber-100 text-amber-700',
   completed: 'bg-emerald-100 text-emerald-700',
+};
+
+const statusLabel: Record<string, string> = {
+  awaiting_scheduling: 'Neu',
+  planned: 'Geplant',
+  in_progress: 'In Arbeit',
+  awaiting_parts: 'Warten auf Teile',
+  completed: 'Abgeschlossen',
+  cancelled: 'Storniert',
+};
+
+const priorityLabel: Record<string, string> = {
+  low: 'Niedrig',
+  normal: 'Mittel',
+  high: 'Hoch',
+  urgent: 'Dringend',
 };
 
 const priorityStyle: Record<string, string> = {
@@ -109,7 +138,11 @@ export default function OrdersPage() {
   const [technicians, setTechnicians] = useState<Technician[]>([]);
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('');
+  const [priority, setPriority] = useState('');
+  const [showFilters, setShowFilters] = useState(false);
   const [selectedId, setSelectedId] = useState('');
+  const [detail, setDetail] = useState<OrderDetail | null>(null);
+  const [showDetails, setShowDetails] = useState(false);
   const [technicianId, setTechnicianId] = useState('');
   const [start, setStart] = useState(() => {
     const date = new Date();
@@ -131,6 +164,7 @@ export default function OrdersPage() {
       const params = new URLSearchParams();
       if (query.trim()) params.set('q', query.trim());
       if (status) params.set('status', status);
+      if (priority) params.set('priority', priority);
       const result = await apiRequest<{ data: Order[] }>(
         `/service-orders?${params.toString()}`,
       );
@@ -155,7 +189,7 @@ export default function OrdersPage() {
     } finally {
       setLoading(false);
     }
-  }, [query, router, status]);
+  }, [priority, query, router, status]);
 
   useEffect(() => {
     if (!getAccessToken()) {
@@ -175,6 +209,16 @@ export default function OrdersPage() {
       })
       .catch(() => null);
   }, []);
+
+  useEffect(() => {
+    if (!selectedId) {
+      setDetail(null);
+      return;
+    }
+    apiRequest<{ data: OrderDetail }>(`/service-orders/${selectedId}`)
+      .then((result) => setDetail(result.data))
+      .catch(() => toast.error('Auftragsdetails konnten nicht geladen werden.'));
+  }, [selectedId]);
 
   async function assign() {
     if (!selected || !technicianId) {
@@ -213,7 +257,10 @@ export default function OrdersPage() {
             Alle Aufträge im Überblick
           </p>
         </div>
-        <button className="h-11 rounded-lg bg-[#ff5a0a] px-5 font-semibold text-white">
+        <button
+          onClick={() => router.push('/office/call-intake')}
+          className="h-11 rounded-lg bg-[#ff5a0a] px-5 font-semibold text-white"
+        >
           + Neuer Auftrag
         </button>
       </div>
@@ -244,10 +291,42 @@ export default function OrdersPage() {
             placeholder="Auftrag, Kunde, Adresse oder Problem suchen…"
           />
         </div>
-        <button className="flex h-10 items-center gap-2 rounded-lg border px-4 text-sm">
+        <button
+          onClick={() => setShowFilters((current) => !current)}
+          className={`flex h-10 items-center gap-2 rounded-lg border px-4 text-sm ${
+            showFilters || priority ? 'border-[#ff5a0a] text-[#ff5a0a]' : ''
+          }`}
+        >
           <Filter className="size-4" /> Filter
         </button>
       </div>
+      {showFilters && (
+        <div className="mb-4 flex items-end gap-3 rounded-xl border bg-white p-4">
+          <label className="text-xs font-medium">
+            Priorität
+            <select
+              value={priority}
+              onChange={(event) => setPriority(event.target.value)}
+              className="mt-1 block h-10 min-w-52 rounded-lg border bg-white px-3 text-sm"
+            >
+              <option value="">Alle Prioritäten</option>
+              <option value="low">Niedrig</option>
+              <option value="normal">Mittel</option>
+              <option value="high">Hoch</option>
+              <option value="urgent">Dringend</option>
+            </select>
+          </label>
+          <button
+            onClick={() => {
+              setPriority('');
+              setQuery('');
+            }}
+            className="h-10 rounded-lg border px-4 text-sm"
+          >
+            Zurücksetzen
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-[1fr_360px] gap-4">
         <section className="overflow-hidden rounded-xl border bg-white">
@@ -315,14 +394,14 @@ export default function OrdersPage() {
                       <span
                         className={`rounded px-2 py-1 text-xs ${statusStyle[order.status] ?? 'bg-slate-100'}`}
                       >
-                        {order.status}
+                        {statusLabel[order.status] ?? order.status}
                       </span>
                     </td>
                     <td className="px-4 py-4">
                       <span
                         className={`rounded px-2 py-1 text-xs ${priorityStyle[order.priority] ?? ''}`}
                       >
-                        {order.priority}
+                        {priorityLabel[order.priority] ?? order.priority}
                       </span>
                     </td>
                     <td className="px-3 py-4">
@@ -401,10 +480,18 @@ export default function OrdersPage() {
                 </button>
               </div>
               <div className="grid grid-cols-2 border-t text-sm">
-                <button className="flex items-center justify-center gap-2 border-r p-4">
+                <button
+                  onClick={() =>
+                    router.push(`/office/customers?customer=${selected.customer.id}`)
+                  }
+                  className="flex items-center justify-center gap-2 border-r p-4"
+                >
                   <UserRound className="size-4" /> Kunde
                 </button>
-                <button className="flex items-center justify-center gap-2 p-4">
+                <button
+                  onClick={() => setShowDetails(true)}
+                  className="flex items-center justify-center gap-2 p-4"
+                >
                   <Wrench className="size-4" /> Details
                   <ChevronRight className="size-4" />
                 </button>
@@ -451,6 +538,87 @@ export default function OrdersPage() {
           </div>
         ))}
       </div>
+
+      {showDetails && detail && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-6">
+          <section className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
+            <header className="flex items-start justify-between border-b p-6">
+              <div>
+                <div className="text-xs font-semibold text-slate-500 uppercase">
+                  Auftrag {detail.order_number}
+                </div>
+                <h2 className="mt-2 text-2xl font-bold">{customerName(detail)}</h2>
+              </div>
+              <button
+                onClick={() => setShowDetails(false)}
+                className="rounded-lg border px-4 py-2 text-sm"
+              >
+                Schließen
+              </button>
+            </header>
+            <div className="grid grid-cols-2 gap-5 p-6 text-sm">
+              <div className="rounded-xl border p-4">
+                <div className="text-xs font-semibold text-slate-500 uppercase">
+                  Problem
+                </div>
+                <div className="mt-2 font-semibold">
+                  {detail.fault_category || 'Ohne Kategorie'}
+                </div>
+                <p className="mt-2 whitespace-pre-wrap">
+                  {detail.fault_description}
+                </p>
+              </div>
+              <div className="rounded-xl border p-4">
+                <div className="text-xs font-semibold text-slate-500 uppercase">
+                  Status
+                </div>
+                <div className="mt-2">
+                  {statusLabel[detail.status] ?? detail.status} ·{' '}
+                  {priorityLabel[detail.priority] ?? detail.priority}
+                </div>
+                <div className="mt-4 text-xs font-semibold text-slate-500 uppercase">
+                  Adresse
+                </div>
+                <p className="mt-2">{location(detail)}</p>
+              </div>
+              <div className="rounded-xl border p-4">
+                <div className="text-xs font-semibold text-slate-500 uppercase">
+                  Kundenmitteilung
+                </div>
+                <p className="mt-2 whitespace-pre-wrap text-slate-600">
+                  {detail.customer_message || 'Keine Mitteilung.'}
+                </p>
+              </div>
+              <div className="rounded-xl border p-4">
+                <div className="text-xs font-semibold text-slate-500 uppercase">
+                  Disposition
+                </div>
+                <p className="mt-2 whitespace-pre-wrap text-slate-600">
+                  {detail.dispatcher_notes || 'Keine internen Hinweise.'}
+                </p>
+              </div>
+              <div className="col-span-2 rounded-xl border p-4">
+                <div className="text-xs font-semibold text-slate-500 uppercase">
+                  Terminwünsche
+                </div>
+                {detail.appointment_constraints.length ? (
+                  detail.appointment_constraints.map((appointment) => (
+                    <div key={appointment.id} className="mt-2">
+                      {new Date(appointment.starts_at).toLocaleString('de-DE')}
+                      {appointment.ends_at
+                        ? ` – ${new Date(appointment.ends_at).toLocaleString('de-DE')}`
+                        : ''}
+                      {appointment.is_hard ? ' · fest zugesagt' : ''}
+                    </div>
+                  ))
+                ) : (
+                  <p className="mt-2 text-slate-500">Kein Terminwunsch.</p>
+                )}
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 }

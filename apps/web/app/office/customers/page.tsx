@@ -116,17 +116,33 @@ export default function CustomersPage() {
   const [detail, setDetail] = useState<CustomerDetail | null>(null);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
+  const [requestedCustomerId, setRequestedCustomerId] = useState('');
+  const [requestedView, setRequestedView] = useState('');
+
+  useEffect(() => {
+    const parameters = new URLSearchParams(window.location.search);
+    setRequestedCustomerId(parameters.get('customer') ?? '');
+    setRequestedView(parameters.get('view') ?? '');
+  }, []);
 
   const loadCustomers = useCallback(async () => {
     setLoading(true);
     try {
       const result = await apiRequest<{ data: CustomerListItem[] }>(
-        `/customers?limit=100${query.trim() ? `&q=${encodeURIComponent(query.trim())}` : ''}`,
+        `/customers?limit=100${
+          query.trim()
+            ? `&q=${encodeURIComponent(query.trim())}`
+            : requestedCustomerId
+              ? `&id=${encodeURIComponent(requestedCustomerId)}`
+              : ''
+        }`,
       );
       setCustomers(result.data);
       setSelectedId((current) =>
         result.data.some((customer) => customer.id === current)
           ? current
+          : result.data.some((customer) => customer.id === requestedCustomerId)
+            ? requestedCustomerId
           : (result.data[0]?.id ?? ''),
       );
     } catch (error) {
@@ -136,7 +152,7 @@ export default function CustomersPage() {
     } finally {
       setLoading(false);
     }
-  }, [query, router]);
+  }, [query, requestedCustomerId, router]);
 
   useEffect(() => {
     if (!getAccessToken()) {
@@ -156,6 +172,15 @@ export default function CustomersPage() {
       .then((result) => setDetail(result.data))
       .catch(() => toast.error('Kundendetails konnten nicht geladen werden.'));
   }, [selectedId]);
+
+  useEffect(() => {
+    if (!detail || !requestedView) return;
+    document
+      .getElementById(
+        requestedView === 'documents' ? 'customer-documents' : 'customer-history',
+      )
+      ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [detail, requestedView]);
 
   const primaryLocation = useMemo(
     () =>
@@ -303,7 +328,10 @@ export default function CustomersPage() {
                 )}
               </section>
 
-              <section className="rounded-xl border bg-white">
+              <section
+                id="customer-history"
+                className="scroll-mt-24 rounded-xl border bg-white"
+              >
                 <div className="flex items-center justify-between border-b p-4">
                   <h3 className="font-bold">Serviceadressen ({detail.service_locations.length})</h3>
                   <button className="text-sm font-semibold text-blue-600">+ Adresse hinzufügen</button>
@@ -374,7 +402,10 @@ export default function CustomersPage() {
         </div>
 
         <aside className="space-y-4">
-          <section className="rounded-xl border bg-white">
+          <section
+            id="customer-documents"
+            className="scroll-mt-24 rounded-xl border bg-white"
+          >
             <div className="flex items-center justify-between border-b p-4">
               <h3 className="font-bold">Geräte beim Kunden ({detail?.assets.length ?? 0})</h3>
               <button className="text-sm font-semibold text-blue-600">+ Gerät</button>

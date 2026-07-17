@@ -14,12 +14,14 @@ class CustomerController extends Controller
     {
         $validated = $request->validate([
             'q' => ['nullable', 'string', 'max:255'],
+            'id' => ['nullable', 'string', 'max:64'],
             'status' => ['nullable', 'string', 'in:active,inactive'],
             'limit' => ['nullable', 'integer', 'min:1', 'max:100'],
         ]);
         $query = trim((string) ($validated['q'] ?? ''));
         $customers = Customer::query()
             ->where('organization_id', $request->user()->organization_id)
+            ->when($validated['id'] ?? null, fn ($builder, $id) => $builder->whereKey($id))
             ->when($validated['status'] ?? null, fn ($builder, $status) => $builder->where('status', $status))
             ->when($query !== '', function ($builder) use ($query): void {
                 $like = '%'.$query.'%';

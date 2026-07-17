@@ -118,6 +118,7 @@ class CallIntakeApiTest extends TestCase
                 'service_location_id' => $location->id,
                 'asset_id' => $asset->id,
                 'priority' => 'high',
+                'fault_category' => 'Heizung / Warmwasser',
                 'fault_description' => 'Heizung wird nicht warm.',
                 'customer_message' => 'Bitte vor Anfahrt anrufen.',
                 'dispatcher_notes' => 'Zugang über den Hof.',
@@ -245,6 +246,7 @@ class CallIntakeApiTest extends TestCase
                 'customer_id' => $customer->id,
                 'service_location_id' => $otherCustomer->serviceLocations()->firstOrFail()->id,
                 'priority' => 'normal',
+                'fault_category' => 'Sonstiges',
                 'fault_description' => 'Test',
             ]);
 
@@ -273,6 +275,7 @@ class CallIntakeApiTest extends TestCase
                 'service_location_id' => $customer->serviceLocations()->firstOrFail()->id,
                 'asset_id' => $foreignAsset->id,
                 'priority' => 'normal',
+                'fault_category' => 'Sonstiges',
                 'fault_description' => 'Test',
             ]);
 
@@ -294,6 +297,7 @@ class CallIntakeApiTest extends TestCase
                     'customer_id' => $customer->id,
                     'service_location_id' => $location->id,
                     'priority' => 'normal',
+                    'fault_category' => 'Sonstiges',
                     'fault_description' => 'Test',
                 ])
                 ->assertCreated()

@@ -68,6 +68,17 @@ const steps = [
   'Bestätigen',
 ];
 
+const faultCategories = [
+  'Waschmaschine – Wasser / Ablauf',
+  'Waschmaschine – Elektrik',
+  'Geschirrspüler',
+  'Kühlgerät – Temperatur',
+  'Heizung / Warmwasser',
+  'Elektrogerät',
+  'Wartung',
+  'Sonstiges',
+];
+
 function Panel({
   title,
   children,
@@ -96,6 +107,7 @@ export default function CallIntakePage() {
   const [customerId, setCustomerId] = useState('');
   const [assetId, setAssetId] = useState('');
   const [priority, setPriority] = useState('high');
+  const [faultCategory, setFaultCategory] = useState(faultCategories[0]);
   const [faultDescription, setFaultDescription] = useState('');
   const [customerMessage, setCustomerMessage] = useState('');
   const [dispatcherNotes, setDispatcherNotes] = useState('');
@@ -180,6 +192,7 @@ export default function CallIntakePage() {
           service_location_id: selectedCustomer.location.id,
           ...(assetId ? { asset_id: assetId } : {}),
           priority,
+          fault_category: faultCategory,
           fault_description: faultDescription,
           customer_message: customerMessage || null,
           dispatcher_notes: dispatcherNotes || null,
@@ -199,8 +212,13 @@ export default function CallIntakePage() {
       });
       toast.success(`Auftrag ${result.data.order_number} wurde angelegt.`);
       router.push(`/office/orders?order=${result.data.id}`);
-    } catch {
-      toast.error('Der Auftrag konnte nicht angelegt werden.');
+    } catch (error) {
+      const message = (error as Error).message;
+      toast.error(
+        message && message !== 'API request failed'
+          ? message
+          : 'Der Auftrag konnte nicht angelegt werden.',
+      );
     } finally {
       setSaving(false);
     }
@@ -358,7 +376,13 @@ export default function CallIntakePage() {
             >
               <Plus className="size-4" /> Neuer Kunde
             </button>
-            <button className="flex h-10 items-center justify-center gap-2 rounded-lg border text-sm hover:bg-slate-50">
+            <button
+              disabled={!selectedCustomer.id}
+              onClick={() =>
+                router.push(`/office/customers?customer=${selectedCustomer.id}`)
+              }
+              className="flex h-10 items-center justify-center gap-2 rounded-lg border text-sm hover:bg-slate-50 disabled:opacity-40"
+            >
               <UserRound className="size-4" /> Öffnen
             </button>
           </div>
@@ -377,21 +401,34 @@ export default function CallIntakePage() {
                 </div>
               </div>
               <div className="space-y-2">
-                <button className="flex h-10 w-full items-center justify-between rounded-lg border px-3 text-sm">
+                <a
+                  href={
+                    selectedCustomer.primary_phone
+                      ? `tel:${selectedCustomer.primary_phone}`
+                      : undefined
+                  }
+                  className="flex h-10 w-full items-center justify-between rounded-lg border px-3 text-sm"
+                >
                   {selectedCustomer.primary_phone || '—'}
                   <Phone className="size-4 text-slate-500" />
-                </button>
+                </a>
                 {selectedCustomer.secondary_phone && (
-                  <button className="flex h-10 w-full items-center justify-between rounded-lg border px-3 text-sm">
+                  <a
+                    href={`tel:${selectedCustomer.secondary_phone}`}
+                    className="flex h-10 w-full items-center justify-between rounded-lg border px-3 text-sm"
+                  >
                     {selectedCustomer.secondary_phone}
                     <Phone className="size-4 text-slate-500" />
-                  </button>
+                  </a>
                 )}
                 {selectedCustomer.email && (
-                  <button className="flex h-10 w-full items-center justify-between rounded-lg border px-3 text-sm">
+                  <a
+                    href={`mailto:${selectedCustomer.email}`}
+                    className="flex h-10 w-full items-center justify-between rounded-lg border px-3 text-sm"
+                  >
                     {selectedCustomer.email}
                     <Mail className="size-4 text-slate-500" />
-                  </button>
+                  </a>
                 )}
               </div>
               <div className="mt-4 flex gap-2 text-sm">
@@ -519,10 +556,14 @@ export default function CallIntakePage() {
               <label className="mb-1 block text-xs font-medium">
                 Problemkategorie
               </label>
-              <select className="h-10 w-full rounded-lg border bg-white px-3 text-sm">
-                <option>Waschmaschine – Wasser / Ablauf</option>
-                <option>Waschmaschine – Elektrik</option>
-                <option>Kühlgerät – Temperatur</option>
+              <select
+                value={faultCategory}
+                onChange={(event) => setFaultCategory(event.target.value)}
+                className="h-10 w-full rounded-lg border bg-white px-3 text-sm"
+              >
+                {faultCategories.map((category) => (
+                  <option key={category}>{category}</option>
+                ))}
               </select>
               <label className="mt-3 mb-1 block text-xs font-medium">
                 Beschreibung
@@ -608,16 +649,36 @@ export default function CallIntakePage() {
         <Panel title="Aktionen">
           <div className="space-y-1">
             {[
-              [Printer, 'Kundenkarte drucken'],
-              [History, 'Historie anzeigen'],
-              [FileText, 'Alle Dokumente'],
-            ].map(([Icon, label]) => (
+              {
+                Icon: Printer,
+                label: 'Kundenkarte drucken',
+                action: () => window.print(),
+              },
+              {
+                Icon: History,
+                label: 'Historie anzeigen',
+                action: () =>
+                  router.push(
+                    `/office/customers?customer=${selectedCustomer.id}&view=history`,
+                  ),
+              },
+              {
+                Icon: FileText,
+                label: 'Alle Dokumente',
+                action: () =>
+                  router.push(
+                    `/office/customers?customer=${selectedCustomer.id}&view=documents`,
+                  ),
+              },
+            ].map(({ Icon, label, action }) => (
               <button
-                key={label as string}
+                key={label}
+                disabled={!selectedCustomer.id}
+                onClick={action}
                 className="flex h-11 w-full items-center gap-3 rounded-lg px-2 text-left text-sm hover:bg-slate-50"
               >
                 <Icon className="size-4 text-slate-500" />
-                {label as string}
+                {label}
               </button>
             ))}
           </div>

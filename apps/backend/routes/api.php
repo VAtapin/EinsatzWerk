@@ -5,7 +5,9 @@ use App\Http\Controllers\Api\V1\CustomerAssetController;
 use App\Http\Controllers\Api\V1\CustomerController;
 use App\Http\Controllers\Api\V1\CustomerSearchController;
 use App\Http\Controllers\Api\V1\DispatchController;
+use App\Http\Controllers\Api\V1\MessageController;
 use App\Http\Controllers\Api\V1\OfficeShellController;
+use App\Http\Controllers\Api\V1\OfficeWorkspaceController;
 use App\Http\Controllers\Api\V1\PartRequirementController;
 use App\Http\Controllers\Api\V1\ServiceOrderController;
 use App\Http\Controllers\Api\V1\TechnicianVisitController;
@@ -21,6 +23,16 @@ Route::prefix('v1')->group(function (): void {
         Route::middleware('ability:office')->group(function (): void {
             Route::get('office/search', [OfficeShellController::class, 'search']);
             Route::get('office/notifications', [OfficeShellController::class, 'notifications']);
+            Route::get('office/analytics', [OfficeWorkspaceController::class, 'analytics']);
+            Route::get('assets', [OfficeWorkspaceController::class, 'assets']);
+            Route::get('technicians/workspace', [OfficeWorkspaceController::class, 'technicians']);
+            Route::get('service-areas', [OfficeWorkspaceController::class, 'serviceAreas']);
+            Route::get('documents', [OfficeWorkspaceController::class, 'documents']);
+            Route::get('settings', [OfficeWorkspaceController::class, 'settings']);
+            Route::patch('settings', [OfficeWorkspaceController::class, 'updateSettings']);
+            Route::get('messages', [MessageController::class, 'index']);
+            Route::post('messages', [MessageController::class, 'store']);
+            Route::patch('messages/{message}/read', [MessageController::class, 'read']);
             Route::get('customers/search', CustomerSearchController::class);
             Route::get('customers', [CustomerController::class, 'index']);
             Route::post('customers', [CustomerController::class, 'store']);
