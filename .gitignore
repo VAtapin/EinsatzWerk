@@ -1,0 +1,21 @@
+# Licensed Metronic source package; keep it local and out of the repository.
+/metronic-responsive-admin-dashboard-template/
+
+# Local legacy sources may contain customer and employee personal data.
+/.local/legacy/
+
+# Local analysis scratch files and generated previews.
+/.local/analysis/
+/.local/tools/
+
+# Runtime dependencies are linked locally and never committed.
+**/node_modules/
+**/.next/
+**/dist/
+**/*.tsbuildinfo
+**/__pycache__/
+**/*.py[cod]
+**/.env
+**/.env.local
+**/.env.production
+!**/.env.example

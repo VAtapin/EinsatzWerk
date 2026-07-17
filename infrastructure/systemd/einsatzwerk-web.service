@@ -1,0 +1,16 @@
+[Unit]
+Description=EinsatzWerk Next.js web
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/einsatzwerk/current/apps/web
+EnvironmentFile=/var/www/einsatzwerk/shared/web.env
+ExecStart=/usr/bin/pnpm start
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

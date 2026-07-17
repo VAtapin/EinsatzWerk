@@ -1,0 +1,32 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Concerns\HasUlids;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class Visit extends Model
+{
+    use HasUlids;
+
+    protected $guarded = [];
+
+    protected function casts(): array
+    {
+        return [
+            'planned_date' => 'date',
+            'planned_start_at' => 'datetime',
+            'planned_end_at' => 'datetime',
+            'actual_arrival_at' => 'datetime',
+            'actual_start_at' => 'datetime',
+            'actual_end_at' => 'datetime',
+            'follow_up_required' => 'boolean',
+        ];
+    }
+
+    public function serviceOrder(): BelongsTo
+    {
+        return $this->belongsTo(ServiceOrder::class);
+    }
+}
