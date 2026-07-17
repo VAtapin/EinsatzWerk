@@ -43,6 +43,8 @@ class CallIntakeApiTest extends TestCase
             ->assertJsonCount(1, 'data')
             ->assertJsonPath('data.0.id', $visible->id)
             ->assertJsonPath('data.0.primary_phone', '03332 123456')
+            ->assertJsonPath('data.0.secondary_phone', null)
+            ->assertJsonPath('data.0.email', null)
             ->assertJsonPath('data.0.assets.0.id', $asset->id)
             ->assertJsonPath('data.0.assets.0.serial_number', '21087465123');
     }
@@ -74,6 +76,8 @@ class CallIntakeApiTest extends TestCase
                 'asset_id' => $asset->id,
                 'priority' => 'high',
                 'fault_description' => 'Heizung wird nicht warm.',
+                'customer_message' => 'Bitte vor Anfahrt anrufen.',
+                'dispatcher_notes' => 'Zugang über den Hof.',
                 'appointment' => [
                     'starts_at' => '2026-07-20T08:00:00+02:00',
                     'ends_at' => '2026-07-20T10:00:00+02:00',
@@ -93,6 +97,8 @@ class CallIntakeApiTest extends TestCase
             'asset_id' => $asset->id,
             'priority' => 'high',
             'source' => 'phone',
+            'customer_message' => 'Bitte vor Anfahrt anrufen.',
+            'dispatcher_notes' => 'Zugang über den Hof.',
         ]);
         $this->assertDatabaseHas('appointment_constraints', [
             'organization_id' => $organization->id,

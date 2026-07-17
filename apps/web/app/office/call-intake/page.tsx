@@ -26,6 +26,9 @@ type Customer = {
   customer_number: string;
   display_name: string;
   primary_phone: string | null;
+  secondary_phone: string | null;
+  email: string | null;
+  notes: string | null;
   assets: Array<{
     id: string;
     model: string | null;
@@ -49,6 +52,9 @@ const emptyCustomer: Customer = {
   customer_number: '',
   display_name: 'Kunde auswählen',
   primary_phone: null,
+  secondary_phone: null,
+  email: null,
+  notes: null,
   assets: [],
   location: null,
 };
@@ -89,9 +95,9 @@ export default function CallIntakePage() {
   const [customerId, setCustomerId] = useState('');
   const [assetId, setAssetId] = useState('');
   const [priority, setPriority] = useState('high');
-  const [faultDescription, setFaultDescription] = useState(
-    'Maschine pumpt nicht ab, Wasser bleibt in der Trommel. Fehler tritt seit gestern Abend auf.',
-  );
+  const [faultDescription, setFaultDescription] = useState('');
+  const [customerMessage, setCustomerMessage] = useState('');
+  const [dispatcherNotes, setDispatcherNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const selectedCustomer =
     customers.find((customer) => customer.id === customerId) ??
@@ -151,6 +157,8 @@ export default function CallIntakePage() {
           ...(assetId ? { asset_id: assetId } : {}),
           priority,
           fault_description: faultDescription,
+          customer_message: customerMessage || null,
+          dispatcher_notes: dispatcherNotes || null,
         }),
       });
       toast.success(`Auftrag ${result.data.order_number} wurde angelegt.`);
@@ -256,14 +264,18 @@ export default function CallIntakePage() {
                   {selectedCustomer.primary_phone || '—'}
                   <Phone className="size-4 text-slate-500" />
                 </button>
-                <button className="flex h-10 w-full items-center justify-between rounded-lg border px-3 text-sm">
-                  0172 3456789
-                  <Phone className="size-4 text-slate-500" />
-                </button>
-                <button className="flex h-10 w-full items-center justify-between rounded-lg border px-3 text-sm">
-                  p.mueller@email.de
-                  <Mail className="size-4 text-slate-500" />
-                </button>
+                {selectedCustomer.secondary_phone && (
+                  <button className="flex h-10 w-full items-center justify-between rounded-lg border px-3 text-sm">
+                    {selectedCustomer.secondary_phone}
+                    <Phone className="size-4 text-slate-500" />
+                  </button>
+                )}
+                {selectedCustomer.email && (
+                  <button className="flex h-10 w-full items-center justify-between rounded-lg border px-3 text-sm">
+                    {selectedCustomer.email}
+                    <Mail className="size-4 text-slate-500" />
+                  </button>
+                )}
               </div>
               <div className="mt-4 flex gap-2 text-sm">
                 <MapPin className="mt-0.5 size-4 shrink-0 text-slate-500" />
@@ -351,11 +363,11 @@ export default function CallIntakePage() {
             <dl className="space-y-3 text-sm">
               <div className="flex justify-between">
                 <dt className="text-slate-500">Eingang</dt>
-                <dd>17.07.2026&nbsp;&nbsp;09:15</dd>
+                <dd>Jetzt</dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-slate-500">Anrufer</dt>
-                <dd>Peter Müller</dd>
+                <dd>{selectedCustomer.display_name}</dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-slate-500">Telefonnummer</dt>
@@ -363,31 +375,19 @@ export default function CallIntakePage() {
               </div>
             </dl>
             <textarea
+              value={customerMessage}
+              onChange={(event) => setCustomerMessage(event.target.value)}
               className="mt-4 min-h-20 w-full rounded-lg border p-3 text-sm outline-none focus:border-[#ff5a0a]"
               placeholder="Rückrufbitte, besondere Hinweise…"
             />
           </Panel>
 
-          <Panel title="Letzte Notizen">
-            <div className="space-y-3 text-sm">
-              <div className="flex gap-3">
-                <FileText className="mt-0.5 size-4 text-slate-400" />
-                <div>
-                  <div className="text-xs text-slate-500">
-                    15.05.2026 · Sabine Becker
-                  </div>
-                  <p className="mt-1">Waschmaschine pumpt manchmal nicht ab.</p>
-                </div>
-              </div>
-              <div className="flex gap-3 border-t pt-3">
-                <History className="mt-0.5 size-4 text-slate-400" />
-                <div>
-                  <div className="text-xs text-slate-500">
-                    03.02.2026 · Thomas Becker
-                  </div>
-                  <p className="mt-1">Kühlschrank kühlt oben zu wenig.</p>
-                </div>
-              </div>
+          <Panel title="Kundennotiz">
+            <div className="flex gap-3 text-sm">
+              <FileText className="mt-0.5 size-4 shrink-0 text-slate-400" />
+              <p className="whitespace-pre-wrap text-slate-600">
+                {selectedCustomer.notes || 'Keine Kundennotiz vorhanden.'}
+              </p>
             </div>
           </Panel>
         </div>
@@ -410,6 +410,7 @@ export default function CallIntakePage() {
                 value={faultDescription}
                 onChange={(event) => setFaultDescription(event.target.value)}
                 className="min-h-20 w-full rounded-lg border p-3 text-sm outline-none focus:border-[#ff5a0a]"
+                placeholder="Fehlerbild so beschreiben, wie der Kunde es schildert…"
               />
             </div>
 
@@ -442,6 +443,8 @@ export default function CallIntakePage() {
                 Sonstige Hinweise
               </label>
               <textarea
+                value={dispatcherNotes}
+                onChange={(event) => setDispatcherNotes(event.target.value)}
                 className="min-h-28 w-full rounded-lg border p-3 text-sm outline-none focus:border-[#ff5a0a]"
                 placeholder="Besondere Umstände, Zugang, Parken…"
               />
@@ -479,15 +482,18 @@ export default function CallIntakePage() {
       <div className="mt-4 flex items-center justify-between rounded-xl border bg-white p-3">
         <div className="flex gap-7 text-sm text-slate-500">
           <span className="flex items-center gap-2">
-            <Clock3 className="size-4" /> Eingang 09:15
+            <Clock3 className="size-4" /> Eingang jetzt
           </span>
           <span className="flex items-center gap-2">
-            <Wrench className="size-4" /> Gerät gewählt
+            <Wrench className="size-4" />{' '}
+            {assetId ? 'Gerät gewählt' : 'Ohne Gerät'}
           </span>
         </div>
         <button
           onClick={createOrder}
-          disabled={saving || !selectedCustomer.id}
+          disabled={
+            saving || !selectedCustomer.id || faultDescription.trim() === ''
+          }
           className="flex h-12 min-w-56 items-center justify-center gap-3 rounded-lg bg-gradient-to-r from-[#ff5a0a] to-[#ff6d00] px-6 font-semibold text-white shadow-lg shadow-orange-200 disabled:opacity-50"
         >
           {saving ? 'Auftrag wird angelegt…' : 'Auftrag anlegen'}
