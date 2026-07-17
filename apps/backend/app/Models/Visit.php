@@ -31,6 +31,11 @@ class Visit extends Model
         return $this->belongsTo(ServiceOrder::class);
     }
 
+    public function technician(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'technician_id');
+    }
+
     public function partRequirements(): HasMany
     {
         return $this->hasMany(PartRequirement::class);

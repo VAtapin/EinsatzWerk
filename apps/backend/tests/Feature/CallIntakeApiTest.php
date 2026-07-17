@@ -101,6 +101,35 @@ class CallIntakeApiTest extends TestCase
         $response->assertUnprocessable()->assertJsonValidationErrors('service_location_id');
     }
 
+    public function test_order_numbers_use_a_transactional_daily_sequence(): void
+    {
+        $organization = Organization::query()->create(['name' => 'EinsatzWerk Demo']);
+        $this->signIn($organization);
+        $customer = $this->customer($organization->id, 'K-10041', 'Müller', '55176');
+        $location = $customer->serviceLocations()->firstOrFail();
+        $numbers = [];
+
+        foreach (range(1, 2) as $unused) {
+            $numbers[] = $this
+                ->withHeader('X-Organization-ID', $organization->id)
+                ->postJson('/api/v1/service-orders', [
+                    'customer_id' => $customer->id,
+                    'service_location_id' => $location->id,
+                    'priority' => 'normal',
+                    'fault_description' => 'Test',
+                ])
+                ->assertCreated()
+                ->json('data.order_number');
+        }
+
+        $this->assertStringEndsWith('-001', $numbers[0]);
+        $this->assertStringEndsWith('-002', $numbers[1]);
+        $this->assertDatabaseHas('order_number_sequences', [
+            'organization_id' => $organization->id,
+            'current_value' => 2,
+        ]);
+    }
+
     private function customer(
         string $organizationId,
         string $number,

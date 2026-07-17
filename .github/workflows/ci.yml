@@ -1,0 +1,84 @@
+name: EinsatzWerk CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: einsatzwerk_test
+          POSTGRES_USER: einsatzwerk
+          POSTGRES_PASSWORD: einsatzwerk_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U einsatzwerk -d einsatzwerk_test"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 20
+
+    env:
+      APP_ENV: testing
+      APP_KEY: base64:n0LsJ+haM9EGJmE8VK2sE4+Hax9wXL2eavkvtj7TrI0=
+      DB_CONNECTION: pgsql
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      DB_DATABASE: einsatzwerk_test
+      DB_USERNAME: einsatzwerk
+      DB_PASSWORD: einsatzwerk_test
+      CACHE_STORE: array
+      SESSION_DRIVER: array
+      QUEUE_CONNECTION: sync
+
+    defaults:
+      run:
+        working-directory: apps/backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          extensions: mbstring, intl, zip, pdo_pgsql
+          coverage: none
+
+      - uses: ramsey/composer-install@v3
+        with:
+          working-directory: apps/backend
+
+      - run: php artisan test
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: apps/web/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm exec tsc --noEmit
+      - run: pnpm build

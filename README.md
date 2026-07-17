@@ -27,9 +27,18 @@ tools/
   legacy-analysis/
 ```
 
-Docker is intentionally not used. The application is deployed and tested on
-the target server with native PHP, PostgreSQL, Redis, Node.js, Nginx, and
-systemd services.
+Production does not use Docker. The target server runs native PHP, PostgreSQL,
+Redis, Node.js, Nginx, and systemd services and updates from Git.
+
+For local development, Docker may provide PostgreSQL and Redis only:
+
+```bash
+docker compose -f compose.dev.yml up -d
+```
+
+The applications themselves can keep running through the local PHP and Node
+runtimes, which keeps debugging fast while testing against production-grade
+infrastructure.
 
 ## Backend
 

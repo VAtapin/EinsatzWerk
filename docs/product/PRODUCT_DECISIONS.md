@@ -165,9 +165,10 @@ The technician application:
 
 Full offline administration and unrestricted offline history are outside MVP.
 
-## Deployment without Docker
+## Deployment and local Docker
 
-Docker is not part of EinsatzWerk.
+Docker is allowed for local PostgreSQL and Redis development infrastructure.
+The production server is deployed natively and updated from the Git repository.
 
 - Development artifacts are deployed directly to the target server.
 - PostgreSQL, Redis, PHP, queue workers, scheduler, object storage access, and

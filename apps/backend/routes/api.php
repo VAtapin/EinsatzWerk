@@ -15,7 +15,11 @@ Route::prefix('v1')->group(function (): void {
         Route::post('auth/logout', [AuthController::class, 'logout']);
         Route::middleware('ability:office')->group(function (): void {
             Route::get('customers/search', CustomerSearchController::class);
+            Route::get('service-orders', [ServiceOrderController::class, 'index']);
             Route::post('service-orders', [ServiceOrderController::class, 'store']);
+            Route::get('service-orders/{serviceOrder}', [ServiceOrderController::class, 'show']);
+            Route::post('service-orders/{serviceOrder}/assign', [ServiceOrderController::class, 'assign']);
+            Route::get('technicians', [ServiceOrderController::class, 'technicians']);
         });
 
         Route::prefix('technician')
