@@ -144,6 +144,31 @@ class CallIntakeApiTest extends TestCase
         ]);
     }
 
+    public function test_dispatcher_can_add_an_asset_to_the_selected_customer(): void
+    {
+        $organization = Organization::query()->create(['name' => 'EinsatzWerk Demo']);
+        $this->signIn($organization);
+        $customer = $this->customer($organization->id, 'K-10041', 'Müller', '55176');
+
+        $response = $this->postJson("/api/v1/customers/{$customer->id}/assets", [
+            'model' => 'ecoTEC plus',
+            'serial_number' => '21087465123',
+            'production_number' => 'FD-2026',
+        ]);
+
+        $response
+            ->assertCreated()
+            ->assertJsonPath('data.customer_id', $customer->id)
+            ->assertJsonPath('data.serial_number', '21087465123')
+            ->assertJsonPath('data.status', 'active');
+        $this->assertDatabaseHas('assets', [
+            'organization_id' => $organization->id,
+            'customer_id' => $customer->id,
+            'service_location_id' => $customer->serviceLocations()->firstOrFail()->id,
+            'serial_number' => '21087465123',
+        ]);
+    }
+
     public function test_location_from_another_customer_cannot_be_used_for_an_order(): void
     {
         $organization = Organization::query()->create(['name' => 'EinsatzWerk Demo']);

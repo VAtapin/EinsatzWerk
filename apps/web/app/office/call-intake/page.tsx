@@ -21,6 +21,16 @@ import {
 import { toast } from 'sonner';
 import { apiRequest, getAccessToken } from '@/lib/einsatzwerk-api';
 
+type Asset = {
+  id: string;
+  model: string | null;
+  serial_number: string | null;
+  production_number: string | null;
+  purchase_date: string | null;
+  status: string;
+  legacy_article_id: string | null;
+};
+
 type Customer = {
   id: string;
   customer_number: string;
@@ -29,15 +39,7 @@ type Customer = {
   secondary_phone: string | null;
   email: string | null;
   notes: string | null;
-  assets: Array<{
-    id: string;
-    model: string | null;
-    serial_number: string | null;
-    production_number: string | null;
-    purchase_date: string | null;
-    status: string;
-    legacy_article_id: string | null;
-  }>;
+  assets: Asset[];
   location: {
     id: string;
     street: string | null;
@@ -100,7 +102,9 @@ export default function CallIntakePage() {
   const [dispatcherNotes, setDispatcherNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [showNewCustomer, setShowNewCustomer] = useState(false);
+  const [showNewAsset, setShowNewAsset] = useState(false);
   const [creatingCustomer, setCreatingCustomer] = useState(false);
+  const [creatingAsset, setCreatingAsset] = useState(false);
   const [newCustomer, setNewCustomer] = useState({
     first_name: '',
     last_name: '',
@@ -110,6 +114,12 @@ export default function CallIntakePage() {
     house_number: '',
     postal_code: '',
     city: '',
+  });
+  const [newAsset, setNewAsset] = useState({
+    model: '',
+    serial_number: '',
+    production_number: '',
+    purchase_date: '',
   });
   const selectedCustomer =
     customers.find((customer) => customer.id === customerId) ??
@@ -210,6 +220,42 @@ export default function CallIntakePage() {
       toast.error('Der Kunde konnte nicht angelegt werden.');
     } finally {
       setCreatingCustomer(false);
+    }
+  }
+
+  async function createAsset(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedCustomer.id) return;
+    setCreatingAsset(true);
+
+    try {
+      const result = await apiRequest<{ data: Asset }>(
+        `/customers/${selectedCustomer.id}/assets`,
+        {
+          method: 'POST',
+          body: JSON.stringify(newAsset),
+        },
+      );
+      setCustomers((current) =>
+        current.map((customer) =>
+          customer.id === selectedCustomer.id
+            ? { ...customer, assets: [result.data, ...customer.assets] }
+            : customer,
+        ),
+      );
+      setAssetId(result.data.id);
+      setShowNewAsset(false);
+      setNewAsset({
+        model: '',
+        serial_number: '',
+        production_number: '',
+        purchase_date: '',
+      });
+      toast.success('Gerät wurde angelegt und ausgewählt.');
+    } catch {
+      toast.error('Das Gerät konnte nicht angelegt werden.');
+    } finally {
+      setCreatingAsset(false);
     }
   }
 
@@ -349,7 +395,11 @@ export default function CallIntakePage() {
                 <span className="text-sm font-semibold">
                   Geräte beim Kunden
                 </span>
-                <button className="text-xs font-semibold text-blue-600">
+                <button
+                  disabled={!selectedCustomer.id}
+                  onClick={() => setShowNewAsset(true)}
+                  className="text-xs font-semibold text-blue-600 disabled:text-slate-300"
+                >
                   + Gerät hinzufügen
                 </button>
               </div>
@@ -614,6 +664,72 @@ export default function CallIntakePage() {
                 className="h-11 rounded-lg bg-[#ff5a0a] px-6 text-sm font-semibold text-white disabled:opacity-50"
               >
                 {creatingCustomer ? 'Wird angelegt…' : 'Kunde anlegen'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {showNewAsset && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-6">
+          <form
+            onSubmit={createAsset}
+            className="w-full max-w-xl rounded-2xl bg-white shadow-2xl"
+          >
+            <div className="flex items-center justify-between border-b px-6 py-4">
+              <div>
+                <h2 className="text-lg font-bold">Gerät hinzufügen</h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Für {selectedCustomer.display_name}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowNewAsset(false)}
+                className="rounded-lg px-3 py-2 text-sm hover:bg-slate-100"
+              >
+                Schließen
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-4 p-6">
+              {[
+                ['model', 'Modell / Bezeichnung', true],
+                ['serial_number', 'Seriennummer', false],
+                ['production_number', 'FD / Produktionsnummer', false],
+                ['purchase_date', 'Kaufdatum', false],
+              ].map(([field, label, required]) => (
+                <label key={field as string} className="text-sm">
+                  <span className="mb-1.5 block font-medium">
+                    {label as string}
+                  </span>
+                  <input
+                    required={required as boolean}
+                    type={field === 'purchase_date' ? 'date' : 'text'}
+                    value={newAsset[field as keyof typeof newAsset] as string}
+                    onChange={(event) =>
+                      setNewAsset((current) => ({
+                        ...current,
+                        [field as string]: event.target.value,
+                      }))
+                    }
+                    className="h-11 w-full rounded-lg border border-slate-200 px-3 outline-none focus:border-[#ff5a0a]"
+                  />
+                </label>
+              ))}
+            </div>
+            <div className="flex justify-end gap-3 border-t px-6 py-4">
+              <button
+                type="button"
+                onClick={() => setShowNewAsset(false)}
+                className="h-11 rounded-lg border px-5 text-sm font-semibold"
+              >
+                Abbrechen
+              </button>
+              <button
+                disabled={creatingAsset}
+                className="h-11 rounded-lg bg-[#ff5a0a] px-6 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                {creatingAsset ? 'Wird angelegt…' : 'Gerät anlegen'}
               </button>
             </div>
           </form>
