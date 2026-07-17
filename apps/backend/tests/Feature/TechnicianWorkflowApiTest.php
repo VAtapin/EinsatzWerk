@@ -10,6 +10,8 @@ use App\Models\ServiceOrder;
 use App\Models\User;
 use App\Models\Visit;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -19,6 +21,7 @@ class TechnicianWorkflowApiTest extends TestCase
 
     public function test_technician_can_run_the_assigned_visit_from_start_to_completion(): void
     {
+        Storage::fake('local');
         [$organization, $technician, $visit] = $this->assignedVisit();
         Sanctum::actingAs($technician, ['technician']);
 
@@ -45,6 +48,19 @@ class TechnicianWorkflowApiTest extends TestCase
             'description' => 'Umwälzpumpe',
             'quantity' => 1,
         ])->assertCreated();
+        $this->postJson("/api/v1/technician/visits/{$visit->id}/used-parts", [
+            'product_id' => $product->id,
+            'description' => 'Umwälzpumpe',
+            'quantity' => 1,
+            'unit_price' => 189,
+        ])->assertCreated();
+        $this->post("/api/v1/technician/visits/{$visit->id}/photos", [
+            'photo' => UploadedFile::fake()->create('anlage.jpg', 100, 'image/jpeg'),
+        ], ['Accept' => 'application/json'])->assertCreated();
+        $this->postJson("/api/v1/technician/visits/{$visit->id}/signature", [
+            'data_url' => 'data:image/png;base64,'.base64_encode('test-signature'),
+            'signer_name' => 'Peter Müller',
+        ])->assertCreated();
 
         $this->postJson("/api/v1/technician/visits/{$visit->id}/complete", [
             'diagnosis' => 'Umwälzpumpe defekt.',
@@ -64,6 +80,15 @@ class TechnicianWorkflowApiTest extends TestCase
             'visit_id' => $visit->id,
             'product_id' => $product->id,
             'status' => 'requested',
+        ]);
+        $this->assertDatabaseHas('visit_parts', [
+            'visit_id' => $visit->id,
+            'description' => 'Umwälzpumpe',
+        ]);
+        $this->assertDatabaseHas('visit_documents', [
+            'visit_id' => $visit->id,
+            'type' => 'service_report',
+            'mime_type' => 'application/pdf',
         ]);
         $this->assertDatabaseCount('status_history', 2);
     }

@@ -6,11 +6,15 @@ use App\Http\Controllers\Controller;
 use App\Models\Product;
 use App\Models\StatusHistory;
 use App\Models\Visit;
+use App\Models\VisitDocument;
+use App\Services\ServiceReportGenerator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class TechnicianVisitController extends Controller
 {
@@ -82,8 +86,91 @@ class TechnicianVisitController extends Controller
         return response()->json(['data' => $part], 201);
     }
 
-    public function complete(Request $request, string $visit): JsonResponse
+    public function usePart(Request $request, string $visit): JsonResponse
     {
+        $visit = $this->findFor($request, $visit);
+        abort_unless($visit->status === 'in_progress', 409);
+        $validated = $request->validate([
+            'product_id' => [
+                'nullable',
+                Rule::exists('products', 'id')
+                    ->where('organization_id', $request->user()->organization_id),
+            ],
+            'description' => ['required', 'string', 'max:500'],
+            'quantity' => ['required', 'numeric', 'gt:0', 'max:9999'],
+            'unit_price' => ['nullable', 'numeric', 'min:0'],
+        ]);
+        $part = $visit->usedParts()->create([
+            ...$validated,
+            'organization_id' => $request->user()->organization_id,
+        ]);
+
+        return response()->json(['data' => $part], 201);
+    }
+
+    public function uploadPhoto(Request $request, string $visit): JsonResponse
+    {
+        $visit = $this->findFor($request, $visit);
+        abort_unless($visit->status === 'in_progress', 409);
+        $validated = $request->validate([
+            'photo' => ['required', 'image', 'max:10240'],
+        ]);
+        $file = $validated['photo'];
+        $path = $file->store(
+            "organizations/{$visit->organization_id}/visits/{$visit->id}/photos",
+            'local',
+        );
+        $document = $visit->documents()->create([
+            'organization_id' => $visit->organization_id,
+            'type' => 'photo',
+            'disk' => 'local',
+            'path' => $path,
+            'original_name' => $file->getClientOriginalName(),
+            'mime_type' => $file->getMimeType(),
+            'size' => $file->getSize(),
+            'created_by' => $request->user()->id,
+        ]);
+
+        return response()->json(['data' => $document], 201);
+    }
+
+    public function signature(Request $request, string $visit): JsonResponse
+    {
+        $visit = $this->findFor($request, $visit);
+        abort_unless($visit->status === 'in_progress', 409);
+        $validated = $request->validate([
+            'data_url' => ['required', 'string', 'starts_with:data:image/png;base64,'],
+            'signer_name' => ['required', 'string', 'max:255'],
+        ]);
+        $binary = base64_decode(substr($validated['data_url'], 22), true);
+        abort_if($binary === false || strlen($binary) > 2_000_000, 422, 'Ungültige Unterschrift.');
+        $path = "organizations/{$visit->organization_id}/visits/{$visit->id}/signature.png";
+        Storage::disk('local')->put($path, $binary);
+        $document = VisitDocument::query()->updateOrCreate(
+            ['visit_id' => $visit->id, 'type' => 'signature'],
+            [
+                'organization_id' => $visit->organization_id,
+                'disk' => 'local',
+                'path' => $path,
+                'original_name' => 'Unterschrift.png',
+                'mime_type' => 'image/png',
+                'size' => strlen($binary),
+                'created_by' => $request->user()->id,
+                'metadata' => [
+                    'signer_name' => $validated['signer_name'],
+                    'signed_at' => now()->toIso8601String(),
+                ],
+            ],
+        );
+
+        return response()->json(['data' => $document], 201);
+    }
+
+    public function complete(
+        Request $request,
+        string $visit,
+        ServiceReportGenerator $reportGenerator,
+    ): JsonResponse {
         $visit = $this->findFor($request, $visit);
         abort_unless($visit->status === 'in_progress', 409);
 
@@ -97,6 +184,12 @@ class TechnicianVisitController extends Controller
             'follow_up_required' => ['required', 'boolean'],
             'technician_notes' => ['nullable', 'string', 'max:5000'],
         ]);
+        abort_if(
+            $validated['result'] !== 'parts_required'
+                && ! $visit->documents()->where('type', 'signature')->exists(),
+            422,
+            'Die Kundenunterschrift fehlt.',
+        );
 
         DB::transaction(function () use ($request, $visit, $validated): void {
             $nextStatus = $validated['result'] === 'parts_required'
@@ -114,8 +207,23 @@ class TechnicianVisitController extends Controller
             ]);
             $this->recordStatus($request, $visit, 'in_progress', $nextStatus);
         });
+        if ($visit->refresh()->status === 'completed') {
+            $reportGenerator->generate($visit);
+        }
 
         return response()->json(['data' => $this->payload($visit->refresh())]);
+    }
+
+    public function document(Request $request, string $visit, string $document): StreamedResponse
+    {
+        $visit = $this->findFor($request, $visit);
+        $documentModel = $visit->documents()->findOrFail($document);
+
+        return Storage::disk($documentModel->disk)->download(
+            $documentModel->path,
+            $documentModel->original_name,
+            ['Content-Type' => $documentModel->mime_type],
+        );
     }
 
     public function products(Request $request): JsonResponse
@@ -148,6 +256,8 @@ class TechnicianVisitController extends Controller
                 'serviceOrder.serviceLocation',
                 'serviceOrder.asset.manufacturer',
                 'partRequirements.product',
+                'usedParts.product',
+                'documents',
             ]);
     }
 
@@ -190,6 +300,18 @@ class TechnicianVisitController extends Controller
             'location' => $order->serviceLocation,
             'asset' => $order->asset,
             'parts' => $visit->partRequirements,
+            'used_parts' => $visit->usedParts,
+            'documents' => $visit->documents->map(fn (VisitDocument $document) => [
+                'id' => $document->id,
+                'type' => $document->type,
+                'name' => $document->original_name,
+                'mime_type' => $document->mime_type,
+                'metadata' => $document->metadata,
+                'download_path' => "/technician/visits/{$visit->id}/documents/{$document->id}",
+            ]),
+            'work_duration_minutes' => $visit->actual_start_at && $visit->actual_end_at
+                ? $visit->actual_start_at->diffInMinutes($visit->actual_end_at)
+                : null,
         ];
     }
 

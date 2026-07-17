@@ -40,4 +40,14 @@ class Visit extends Model
     {
         return $this->hasMany(PartRequirement::class);
     }
+
+    public function usedParts(): HasMany
+    {
+        return $this->hasMany(VisitPart::class);
+    }
+
+    public function documents(): HasMany
+    {
+        return $this->hasMany(VisitDocument::class);
+    }
 }

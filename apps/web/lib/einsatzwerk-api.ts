@@ -25,7 +25,9 @@ export async function apiRequest<T>(
     ...init,
     headers: {
       Accept: 'application/json',
-      'Content-Type': 'application/json',
+      ...(init.body instanceof FormData
+        ? {}
+        : { 'Content-Type': 'application/json' }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...init.headers,
     },
@@ -47,4 +49,20 @@ export async function apiRequest<T>(
   }
 
   return response.json() as Promise<T>;
+}
+
+export async function apiDownload(path: string, filename: string): Promise<void> {
+  const token = getAccessToken();
+  const response = await fetch(`${API_URL}${path}`, {
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+  if (!response.ok) throw new Error('Dokument konnte nicht geladen werden.');
+  const url = URL.createObjectURL(await response.blob());
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
 }

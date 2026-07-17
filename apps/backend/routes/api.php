@@ -37,7 +37,11 @@ Route::prefix('v1')->group(function (): void {
                 Route::get('visits/{visit}', [TechnicianVisitController::class, 'show']);
                 Route::post('visits/{visit}/start', [TechnicianVisitController::class, 'start']);
                 Route::post('visits/{visit}/parts', [TechnicianVisitController::class, 'requestPart']);
+                Route::post('visits/{visit}/used-parts', [TechnicianVisitController::class, 'usePart']);
+                Route::post('visits/{visit}/photos', [TechnicianVisitController::class, 'uploadPhoto']);
+                Route::post('visits/{visit}/signature', [TechnicianVisitController::class, 'signature']);
                 Route::post('visits/{visit}/complete', [TechnicianVisitController::class, 'complete']);
+                Route::get('visits/{visit}/documents/{document}', [TechnicianVisitController::class, 'document']);
             });
     });
 });
