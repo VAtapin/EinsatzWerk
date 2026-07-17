@@ -8,6 +8,7 @@ use App\Models\ServiceLocation;
 use App\Models\ServiceOrder;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -96,6 +97,28 @@ class OfficeDispatchWorkflowTest extends TestCase
         $this->getJson('/api/v1/dispatch/board?date='.now()->addDay()->toDateString())
             ->assertOk()
             ->assertJsonPath('data.technicians.0.assigned_visits.0.service_order.id', $order->id);
+
+        Http::fake([
+            '*/search*' => Http::response([[
+                'lat' => '53.0598',
+                'lon' => '14.2829',
+                'place_id' => 1001,
+                'display_name' => 'Friedrichstraße 12, Schwedt/Oder',
+                'type' => 'house',
+            ]]),
+        ]);
+        $this->postJson('/api/v1/dispatch/route/build', [
+            'date' => now()->addDay()->toDateString(),
+            'technician_id' => $technician->id,
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.stops.0.visit_id', fn ($id) => is_string($id))
+            ->assertJsonPath('data.stops.0.latitude', 53.0598);
+        $this->assertDatabaseHas('routes', [
+            'organization_id' => $organization->id,
+            'technician_id' => $technician->id,
+            'optimization_provider' => 'osrm',
+        ]);
     }
 
     public function test_dispatcher_cannot_create_overlapping_visits(): void

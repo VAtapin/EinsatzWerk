@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import { Toaster } from '@/components/ui/sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import '@/styles/globals.css';
+import 'leaflet/dist/leaflet.css';
 
 const inter = Inter({ subsets: ['latin'] });
 

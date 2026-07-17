@@ -1,6 +1,13 @@
 <?php
 
 return [
+    'maps' => [
+        'geocoding_provider' => env('MAP_GEOCODING_PROVIDER', 'nominatim'),
+        'geocoding_url' => env('MAP_GEOCODING_URL', 'https://nominatim.openstreetmap.org'),
+        'routing_provider' => env('MAP_ROUTING_PROVIDER', 'osrm'),
+        'routing_url' => env('MAP_ROUTING_URL', 'https://router.project-osrm.org'),
+        'user_agent' => env('MAP_USER_AGENT', 'EinsatzWerk/1.0 kontakt@einsatz-werk.de'),
+    ],
 
     /*
     |--------------------------------------------------------------------------

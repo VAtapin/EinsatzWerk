@@ -27,6 +27,8 @@ Route::prefix('v1')->group(function (): void {
             Route::get('technicians', [ServiceOrderController::class, 'technicians']);
             Route::get('dispatch/board', [DispatchController::class, 'board']);
             Route::patch('dispatch/visits/{visit}', [DispatchController::class, 'reschedule']);
+            Route::get('dispatch/route', [DispatchController::class, 'route']);
+            Route::post('dispatch/route/build', [DispatchController::class, 'buildRoute']);
         });
 
         Route::prefix('technician')

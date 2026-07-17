@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { CalendarDays, Clock3, GripVertical, MapPin, UserRound } from 'lucide-react';
 import { toast } from 'sonner';
@@ -35,6 +36,29 @@ type Board = {
   unassigned_orders: Order[];
 };
 
+type RouteData = {
+  id: string;
+  distance_meters: number;
+  duration_seconds: number;
+  geometry: { type: 'LineString'; coordinates: [number, number][] } | null;
+  stops: Array<{
+    id: string;
+    sequence: number;
+    latitude: number;
+    longitude: number;
+    customer: string;
+  }>;
+};
+
+const RouteMap = dynamic(() => import('@/components/einsatzwerk/route-map'), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-80 items-center justify-center">
+      Karte wird geladen…
+    </div>
+  ),
+});
+
 function localDate(date: Date): string {
   const offset = date.getTimezoneOffset() * 60_000;
   return new Date(date.getTime() - offset).toISOString().slice(0, 10);
@@ -50,12 +74,19 @@ export default function PlanningPage() {
   const [date, setDate] = useState(() => localDate(new Date()));
   const [board, setBoard] = useState<Board | null>(null);
   const [moving, setMoving] = useState(false);
+  const [routeData, setRouteData] = useState<RouteData | null>(null);
+  const [routeTechnicianId, setRouteTechnicianId] = useState('');
   const hours = useMemo(() => Array.from({ length: 11 }, (_, index) => index + 7), []);
 
   const load = useCallback(async () => {
     try {
       const result = await apiRequest<{ data: Board }>(`/dispatch/board?date=${date}`);
       setBoard(result.data);
+      setRouteTechnicianId((current) =>
+        result.data.technicians.some((technician) => technician.id === current)
+          ? current
+          : (result.data.technicians[0]?.id ?? ''),
+      );
     } catch (error) {
       const status = (error as Error & { status?: number }).status;
       if (status === 401 || status === 403) router.replace('/login');
@@ -109,6 +140,26 @@ export default function PlanningPage() {
       }
       toast.success('Planung wurde aktualisiert.');
       await load();
+    } catch (error) {
+      toast.error((error as Error).message);
+    } finally {
+      setMoving(false);
+    }
+  }
+
+  async function calculateRoute() {
+    if (!routeTechnicianId) return;
+    setMoving(true);
+    try {
+      const result = await apiRequest<{ data: RouteData }>(
+        '/dispatch/route/build',
+        {
+          method: 'POST',
+          body: JSON.stringify({ date, technician_id: routeTechnicianId }),
+        },
+      );
+      setRouteData(result.data);
+      toast.success('Route wurde berechnet und gespeichert.');
     } catch (error) {
       toast.error((error as Error).message);
     } finally {
@@ -227,6 +278,51 @@ export default function PlanningPage() {
           ))}
         </section>
       </div>
+      <section className="mt-4 overflow-hidden rounded-xl border bg-white">
+        <div className="flex items-center justify-between border-b p-4">
+          <div>
+            <strong>Route & Karte</strong>
+            {routeData && (
+              <span className="ml-4 text-sm text-slate-500">
+                {(routeData.distance_meters / 1000).toFixed(1)} km ·{' '}
+                {Math.round(routeData.duration_seconds / 60)} min Fahrzeit
+              </span>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <select
+              value={routeTechnicianId}
+              onChange={(event) => {
+                setRouteTechnicianId(event.target.value);
+                setRouteData(null);
+              }}
+              className="h-10 rounded-lg border px-3 text-sm"
+            >
+              {board?.technicians.map((technician) => (
+                <option key={technician.id} value={technician.id}>
+                  {technician.name}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={calculateRoute}
+              disabled={!routeTechnicianId || moving}
+              className="h-10 rounded-lg bg-[#061b31] px-4 text-sm font-semibold text-white disabled:opacity-40"
+            >
+              Route berechnen
+            </button>
+          </div>
+        </div>
+        {routeData ? (
+          <div className="h-[430px]">
+            <RouteMap route={routeData} />
+          </div>
+        ) : (
+          <div className="flex h-48 items-center justify-center text-sm text-slate-500">
+            Techniker auswählen und Route berechnen.
+          </div>
+        )}
+      </section>
     </div>
   );
 }

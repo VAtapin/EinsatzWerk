@@ -19,6 +19,8 @@ class ServiceLocation extends Model
             'is_primary' => 'boolean',
             'latitude' => 'decimal:7',
             'longitude' => 'decimal:7',
+            'geocoded_at' => 'datetime',
+            'geocoding_data' => 'array',
         ];
     }
 
