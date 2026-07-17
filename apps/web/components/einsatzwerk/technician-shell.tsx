@@ -2,18 +2,20 @@
 
 import { ReactNode } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   Bell,
   CalendarCheck,
   ClipboardList,
   Ellipsis,
+  LogOut,
   Menu,
   MessageSquare,
   Plus,
   Settings,
   UserRound,
 } from 'lucide-react';
+import { apiRequest, clearAccessToken } from '@/lib/einsatzwerk-api';
 import { EinsatzWerkBrand } from './brand';
 
 const nav = [
@@ -26,6 +28,13 @@ const nav = [
 
 export function TechnicianShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
+
+  async function logout() {
+    await apiRequest('/auth/logout', { method: 'POST' }).catch(() => null);
+    clearAccessToken();
+    router.replace('/login');
+  }
 
   return (
     <div className="min-h-screen bg-[#f5f7fb] text-[#10213d]">
@@ -79,6 +88,13 @@ export function TechnicianShell({ children }: { children: ReactNode }) {
               <div className="font-semibold">Thomas Becker</div>
               <div className="text-xs text-white/60">T-1001 · Online</div>
             </div>
+            <button
+              onClick={logout}
+              className="ml-auto flex size-10 items-center justify-center rounded-full hover:bg-white/10"
+              title="Abmelden"
+            >
+              <LogOut className="size-5" />
+            </button>
           </div>
         </div>
       </aside>

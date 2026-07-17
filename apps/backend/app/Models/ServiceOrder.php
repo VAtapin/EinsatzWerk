@@ -31,6 +31,11 @@ class ServiceOrder extends Model
         return $this->belongsTo(ServiceLocation::class);
     }
 
+    public function asset(): BelongsTo
+    {
+        return $this->belongsTo(Asset::class);
+    }
+
     public function visits(): HasMany
     {
         return $this->hasMany(Visit::class);
