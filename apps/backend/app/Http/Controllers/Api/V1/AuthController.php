@@ -92,6 +92,8 @@ class AuthController extends Controller
             'organization_id' => $user->organization_id,
             'name' => $user->name,
             'email' => $user->email,
+            'phone' => $user->phone,
+            'locale' => $user->locale,
             'role' => $user->role_code,
             'landing_path' => $user->role_code === 'technician'
                 ? '/technician/today'

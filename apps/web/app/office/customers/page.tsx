@@ -16,7 +16,11 @@ import {
   UserRound,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { apiRequest, getAccessToken } from '@/lib/einsatzwerk-api';
+import {
+  apiDownload,
+  apiRequest,
+  getAccessToken,
+} from '@/lib/einsatzwerk-api';
 
 type Location = {
   id: string;
@@ -53,6 +57,9 @@ type Asset = {
   purchase_date: string | null;
   status: string;
   manufacturer: { id: string; name: string } | null;
+  installation_date?: string | null;
+  warranty_until?: string | null;
+  notes?: string | null;
 };
 
 type ServiceOrder = {
@@ -72,6 +79,15 @@ type CommercialDocument = {
   document_date: string | null;
 };
 
+type CustomerDocument = {
+  id: string;
+  name: string;
+  type: string;
+  mime_type: string | null;
+  size: number | null;
+  created_at: string;
+};
+
 type CustomerDetail = CustomerListItem & {
   secondary_phone: string | null;
   email: string | null;
@@ -80,6 +96,7 @@ type CustomerDetail = CustomerListItem & {
   assets: Asset[];
   service_orders: ServiceOrder[];
   commercial_documents: CommercialDocument[];
+  documents: CustomerDocument[];
 };
 
 function displayName(customer: Pick<CustomerListItem, 'company_name' | 'first_name' | 'last_name'>) {
@@ -118,6 +135,44 @@ export default function CustomersPage() {
   const [loading, setLoading] = useState(true);
   const [requestedCustomerId, setRequestedCustomerId] = useState('');
   const [requestedView, setRequestedView] = useState('');
+  const [editor, setEditor] = useState<'customer' | 'location' | 'asset' | null>(
+    null,
+  );
+  const [saving, setSaving] = useState(false);
+  const [uploadingDocument, setUploadingDocument] = useState(false);
+  const [customerForm, setCustomerForm] = useState({
+    first_name: '',
+    last_name: '',
+    company_name: '',
+    primary_phone: '',
+    secondary_phone: '',
+    email: '',
+    notes: '',
+    status: 'active',
+  });
+  const [locationForm, setLocationForm] = useState({
+    name: '',
+    contact_person: '',
+    street: '',
+    house_number: '',
+    address_addition: '',
+    postal_code: '',
+    city: '',
+    access_notes: '',
+    parking_notes: '',
+    is_primary: false,
+  });
+  const [assetForm, setAssetForm] = useState({
+    id: '',
+    model: '',
+    serial_number: '',
+    production_number: '',
+    purchase_date: '',
+    installation_date: '',
+    warranty_until: '',
+    notes: '',
+    status: 'active',
+  });
 
   useEffect(() => {
     const parameters = new URLSearchParams(window.location.search);
@@ -188,6 +243,126 @@ export default function CustomersPage() {
       detail?.service_locations[0],
     [detail],
   );
+
+  async function refreshDetail() {
+    if (!selectedId) return;
+    const result = await apiRequest<{ data: CustomerDetail }>(
+      `/customers/${selectedId}`,
+    );
+    setDetail(result.data);
+  }
+
+  function openCustomerEditor() {
+    if (!detail) return;
+    setCustomerForm({
+      first_name: detail.first_name || '',
+      last_name: detail.last_name || '',
+      company_name: detail.company_name || '',
+      primary_phone: detail.primary_phone || '',
+      secondary_phone: detail.secondary_phone || '',
+      email: detail.email || '',
+      notes: detail.notes || '',
+      status: detail.status || 'active',
+    });
+    setEditor('customer');
+  }
+
+  function openAssetEditor(asset?: Asset) {
+    setAssetForm({
+      id: asset?.id || '',
+      model: asset?.model || '',
+      serial_number: asset?.serial_number || '',
+      production_number: asset?.production_number || '',
+      purchase_date: asset?.purchase_date?.slice(0, 10) || '',
+      installation_date: asset?.installation_date?.slice(0, 10) || '',
+      warranty_until: asset?.warranty_until?.slice(0, 10) || '',
+      notes: asset?.notes || '',
+      status: asset?.status || 'active',
+    });
+    setEditor('asset');
+  }
+
+  async function saveCustomer(event: React.FormEvent) {
+    event.preventDefault();
+    if (!selectedId) return;
+    setSaving(true);
+    try {
+      await apiRequest(`/customers/${selectedId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(customerForm),
+      });
+      await Promise.all([refreshDetail(), loadCustomers()]);
+      setEditor(null);
+      toast.success('Kundendaten wurden gespeichert.');
+    } catch {
+      toast.error('Kundendaten konnten nicht gespeichert werden.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveLocation(event: React.FormEvent) {
+    event.preventDefault();
+    if (!selectedId) return;
+    setSaving(true);
+    try {
+      await apiRequest(`/customers/${selectedId}/locations`, {
+        method: 'POST',
+        body: JSON.stringify(locationForm),
+      });
+      await refreshDetail();
+      setEditor(null);
+      toast.success('Serviceadresse wurde hinzugefügt.');
+    } catch {
+      toast.error('Serviceadresse konnte nicht gespeichert werden.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveAsset(event: React.FormEvent) {
+    event.preventDefault();
+    if (!selectedId) return;
+    setSaving(true);
+    try {
+      const { id, ...payload } = assetForm;
+      await apiRequest(
+        id
+          ? `/customers/${selectedId}/assets/${id}`
+          : `/customers/${selectedId}/assets`,
+        {
+          method: id ? 'PATCH' : 'POST',
+          body: JSON.stringify(payload),
+        },
+      );
+      await refreshDetail();
+      setEditor(null);
+      toast.success(id ? 'Gerät wurde aktualisiert.' : 'Gerät wurde hinzugefügt.');
+    } catch {
+      toast.error('Gerät konnte nicht gespeichert werden.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function uploadDocument(file?: File) {
+    if (!selectedId || !file) return;
+    setUploadingDocument(true);
+    try {
+      const body = new FormData();
+      body.append('file', file);
+      await apiRequest(`/customers/${selectedId}/documents`, {
+        method: 'POST',
+        body,
+      });
+      await refreshDetail();
+      toast.success('Dokument wurde hochgeladen.');
+    } catch {
+      toast.error('Dokument konnte nicht hochgeladen werden.');
+    } finally {
+      setUploadingDocument(false);
+    }
+  }
 
   return (
     <div className="min-w-[1200px] px-6 py-5">
@@ -299,14 +474,21 @@ export default function CustomersPage() {
                       </div>
                     </div>
                   </div>
-                  <button className="flex items-center gap-2 text-sm font-semibold text-blue-600">
+                  <button
+                    onClick={openCustomerEditor}
+                    className="flex items-center gap-2 text-sm font-semibold text-blue-600"
+                  >
                     <Pencil className="size-4" /> Bearbeiten
                   </button>
                 </div>
                 <div className="grid grid-cols-2 gap-x-8 gap-y-3 border-t pt-4 text-sm">
                   <div className="flex items-center gap-3">
                     <Phone className="size-4 text-slate-400" />
-                    <span>{detail.primary_phone || '—'}</span>
+                    {detail.primary_phone ? (
+                      <a href={`tel:${detail.primary_phone}`}>{detail.primary_phone}</a>
+                    ) : (
+                      <span>—</span>
+                    )}
                   </div>
                   <div className="flex items-center gap-3">
                     <Phone className="size-4 text-slate-400" />
@@ -314,7 +496,11 @@ export default function CustomersPage() {
                   </div>
                   <div className="flex items-center gap-3">
                     <Mail className="size-4 text-slate-400" />
-                    <span>{detail.email || '—'}</span>
+                    {detail.email ? (
+                      <a href={`mailto:${detail.email}`}>{detail.email}</a>
+                    ) : (
+                      <span>—</span>
+                    )}
                   </div>
                   <div className="flex items-start gap-3">
                     <MapPin className="mt-0.5 size-4 text-slate-400" />
@@ -334,7 +520,26 @@ export default function CustomersPage() {
               >
                 <div className="flex items-center justify-between border-b p-4">
                   <h3 className="font-bold">Serviceadressen ({detail.service_locations.length})</h3>
-                  <button className="text-sm font-semibold text-blue-600">+ Adresse hinzufügen</button>
+                  <button
+                    onClick={() => {
+                      setLocationForm({
+                        name: '',
+                        contact_person: '',
+                        street: '',
+                        house_number: '',
+                        address_addition: '',
+                        postal_code: '',
+                        city: '',
+                        access_notes: '',
+                        parking_notes: '',
+                        is_primary: detail.service_locations.length === 0,
+                      });
+                      setEditor('location');
+                    }}
+                    className="text-sm font-semibold text-blue-600"
+                  >
+                    + Adresse hinzufügen
+                  </button>
                 </div>
                 <div className="grid grid-cols-2 divide-x">
                   {detail.service_locations.slice(0, 2).map((location, index) => (
@@ -408,10 +613,19 @@ export default function CustomersPage() {
           >
             <div className="flex items-center justify-between border-b p-4">
               <h3 className="font-bold">Geräte beim Kunden ({detail?.assets.length ?? 0})</h3>
-              <button className="text-sm font-semibold text-blue-600">+ Gerät</button>
+              <button
+                onClick={() => openAssetEditor()}
+                className="text-sm font-semibold text-blue-600"
+              >
+                + Gerät
+              </button>
             </div>
             {detail?.assets.map((asset) => (
-              <div key={asset.id} className="flex items-center gap-3 border-b p-4">
+              <button
+                key={asset.id}
+                onClick={() => openAssetEditor(asset)}
+                className="flex w-full items-center gap-3 border-b p-4 text-left hover:bg-slate-50"
+              >
                 <div className="flex size-12 shrink-0 items-center justify-center rounded-lg bg-slate-100">
                   <PackageOpen className="size-6 text-slate-500" />
                 </div>
@@ -430,7 +644,7 @@ export default function CustomersPage() {
                   {asset.status === 'active' ? 'Aktiv' : 'Inaktiv'}
                 </span>
                 <ChevronRight className="size-4 text-slate-400" />
-              </div>
+              </button>
             ))}
             {!detail?.assets.length && (
               <div className="p-8 text-center text-sm text-slate-500">Keine Geräte erfasst.</div>
@@ -440,8 +654,42 @@ export default function CustomersPage() {
           <section className="rounded-xl border bg-white">
             <div className="flex items-center justify-between border-b p-4">
               <h3 className="font-bold">Dokumente</h3>
-              <button className="text-sm font-semibold text-blue-600">+ Dokument</button>
+              <label className="cursor-pointer text-sm font-semibold text-blue-600">
+                {uploadingDocument ? 'Wird hochgeladen…' : '+ Dokument'}
+                <input
+                  type="file"
+                  disabled={uploadingDocument}
+                  onChange={(event) => {
+                    void uploadDocument(event.target.files?.[0]);
+                    event.target.value = '';
+                  }}
+                  className="hidden"
+                />
+              </label>
             </div>
+            {detail?.documents.map((document) => (
+              <button
+                key={document.id}
+                onClick={() =>
+                  apiDownload(
+                    `/customers/${detail.id}/documents/${document.id}`,
+                    document.name,
+                  ).catch(() =>
+                    toast.error('Dokument konnte nicht geladen werden.'),
+                  )
+                }
+                className="flex w-full items-center gap-3 border-b p-4 text-left text-sm hover:bg-slate-50"
+              >
+                <FileText className="size-5 shrink-0 text-blue-500" />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-medium">{document.name}</div>
+                  <div className="text-xs text-slate-500">
+                    {document.type} ·{' '}
+                    {new Date(document.created_at).toLocaleDateString('de-DE')}
+                  </div>
+                </div>
+              </button>
+            ))}
             {detail?.commercial_documents.map((document) => (
               <div key={document.id} className="flex items-center gap-3 border-b p-4 text-sm">
                 <FileText className="size-5 shrink-0 text-red-500" />
@@ -456,7 +704,7 @@ export default function CustomersPage() {
                 </div>
               </div>
             ))}
-            {!detail?.commercial_documents.length && (
+            {!detail?.commercial_documents.length && !detail?.documents.length && (
               <div className="p-8 text-center text-sm text-slate-500">
                 Keine Dokumente vorhanden.
               </div>
@@ -464,6 +712,237 @@ export default function CustomersPage() {
           </section>
         </aside>
       </div>
+
+      {editor === 'customer' && (
+        <EditorModal title="Kunde bearbeiten" onClose={() => setEditor(null)}>
+          <form onSubmit={saveCustomer}>
+            <div className="grid grid-cols-2 gap-4 p-6">
+              {[
+                ['first_name', 'Vorname', false],
+                ['last_name', 'Nachname', true],
+                ['company_name', 'Firma', false],
+                ['primary_phone', 'Telefon', false],
+                ['secondary_phone', 'Mobil / Telefon 2', false],
+                ['email', 'E-Mail', false],
+              ].map(([field, label, required]) => (
+                <label key={field as string} className="text-sm font-medium">
+                  {label as string}
+                  <input
+                    required={required as boolean}
+                    type={field === 'email' ? 'email' : 'text'}
+                    value={
+                      customerForm[field as keyof typeof customerForm] as string
+                    }
+                    onChange={(event) =>
+                      setCustomerForm((current) => ({
+                        ...current,
+                        [field as string]: event.target.value,
+                      }))
+                    }
+                    className="mt-1 h-11 w-full rounded-lg border px-3"
+                  />
+                </label>
+              ))}
+              <label className="col-span-2 text-sm font-medium">
+                Notizen
+                <textarea
+                  value={customerForm.notes}
+                  onChange={(event) =>
+                    setCustomerForm((current) => ({
+                      ...current,
+                      notes: event.target.value,
+                    }))
+                  }
+                  className="mt-1 min-h-28 w-full rounded-lg border p-3"
+                />
+              </label>
+              <label className="text-sm font-medium">
+                Status
+                <select
+                  value={customerForm.status}
+                  onChange={(event) =>
+                    setCustomerForm((current) => ({
+                      ...current,
+                      status: event.target.value,
+                    }))
+                  }
+                  className="mt-1 h-11 w-full rounded-lg border bg-white px-3"
+                >
+                  <option value="active">Aktiv</option>
+                  <option value="inactive">Inaktiv</option>
+                </select>
+              </label>
+            </div>
+            <EditorFooter saving={saving} onCancel={() => setEditor(null)} />
+          </form>
+        </EditorModal>
+      )}
+
+      {editor === 'location' && (
+        <EditorModal title="Serviceadresse hinzufügen" onClose={() => setEditor(null)}>
+          <form onSubmit={saveLocation}>
+            <div className="grid grid-cols-2 gap-4 p-6">
+              {[
+                ['name', 'Bezeichnung', false],
+                ['contact_person', 'Kontaktperson', false],
+                ['street', 'Straße', false],
+                ['house_number', 'Hausnummer', false],
+                ['postal_code', 'PLZ', true],
+                ['city', 'Ort', true],
+                ['access_notes', 'Zugangshinweise', false],
+                ['parking_notes', 'Parkhinweise', false],
+              ].map(([field, label, required]) => (
+                <label key={field as string} className="text-sm font-medium">
+                  {label as string}
+                  <input
+                    required={required as boolean}
+                    value={
+                      locationForm[field as keyof typeof locationForm] as string
+                    }
+                    onChange={(event) =>
+                      setLocationForm((current) => ({
+                        ...current,
+                        [field as string]: event.target.value,
+                      }))
+                    }
+                    className="mt-1 h-11 w-full rounded-lg border px-3"
+                  />
+                </label>
+              ))}
+              <label className="col-span-2 flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={locationForm.is_primary}
+                  onChange={(event) =>
+                    setLocationForm((current) => ({
+                      ...current,
+                      is_primary: event.target.checked,
+                    }))
+                  }
+                />
+                Als Hauptadresse verwenden
+              </label>
+            </div>
+            <EditorFooter saving={saving} onCancel={() => setEditor(null)} />
+          </form>
+        </EditorModal>
+      )}
+
+      {editor === 'asset' && (
+        <EditorModal
+          title={assetForm.id ? 'Gerät bearbeiten' : 'Gerät hinzufügen'}
+          onClose={() => setEditor(null)}
+        >
+          <form onSubmit={saveAsset}>
+            <div className="grid grid-cols-2 gap-4 p-6">
+              {[
+                ['model', 'Modell / Bezeichnung', true, 'text'],
+                ['serial_number', 'Seriennummer', false, 'text'],
+                ['production_number', 'FD / Produktionsnummer', false, 'text'],
+                ['purchase_date', 'Kaufdatum', false, 'date'],
+                ['installation_date', 'Installationsdatum', false, 'date'],
+                ['warranty_until', 'Garantie bis', false, 'date'],
+              ].map(([field, label, required, type]) => (
+                <label key={field as string} className="text-sm font-medium">
+                  {label as string}
+                  <input
+                    required={required as boolean}
+                    type={type as string}
+                    value={assetForm[field as keyof typeof assetForm] as string}
+                    onChange={(event) =>
+                      setAssetForm((current) => ({
+                        ...current,
+                        [field as string]: event.target.value,
+                      }))
+                    }
+                    className="mt-1 h-11 w-full rounded-lg border px-3"
+                  />
+                </label>
+              ))}
+              <label className="col-span-2 text-sm font-medium">
+                Notizen
+                <textarea
+                  value={assetForm.notes}
+                  onChange={(event) =>
+                    setAssetForm((current) => ({
+                      ...current,
+                      notes: event.target.value,
+                    }))
+                  }
+                  className="mt-1 min-h-24 w-full rounded-lg border p-3"
+                />
+              </label>
+              <label className="text-sm font-medium">
+                Status
+                <select
+                  value={assetForm.status}
+                  onChange={(event) =>
+                    setAssetForm((current) => ({
+                      ...current,
+                      status: event.target.value,
+                    }))
+                  }
+                  className="mt-1 h-11 w-full rounded-lg border bg-white px-3"
+                >
+                  <option value="active">Aktiv</option>
+                  <option value="inactive">Inaktiv</option>
+                </select>
+              </label>
+            </div>
+            <EditorFooter saving={saving} onCancel={() => setEditor(null)} />
+          </form>
+        </EditorModal>
+      )}
     </div>
+  );
+}
+
+function EditorModal({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-6">
+      <section className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
+        <header className="flex items-center justify-between border-b px-6 py-4">
+          <h2 className="text-lg font-bold">{title}</h2>
+          <button onClick={onClose} className="rounded-lg border px-3 py-2 text-sm">
+            Schließen
+          </button>
+        </header>
+        {children}
+      </section>
+    </div>
+  );
+}
+
+function EditorFooter({
+  saving,
+  onCancel,
+}: {
+  saving: boolean;
+  onCancel: () => void;
+}) {
+  return (
+    <footer className="flex justify-end gap-3 border-t px-6 py-4">
+      <button
+        type="button"
+        onClick={onCancel}
+        className="h-11 rounded-lg border px-5"
+      >
+        Abbrechen
+      </button>
+      <button
+        disabled={saving}
+        className="h-11 rounded-lg bg-[#ff5a0a] px-6 font-semibold text-white disabled:opacity-50"
+      >
+        {saving ? 'Speichern…' : 'Speichern'}
+      </button>
+    </footer>
   );
 }

@@ -356,9 +356,12 @@ export default function TechnicianVisitPage() {
                     <Phone className="size-5" />
                   </a>
                 )}
-                <button className="flex size-10 items-center justify-center rounded-full border">
+                <Link
+                  href="/technician/messages"
+                  className="flex size-10 items-center justify-center rounded-full border"
+                >
                   <MessageSquare className="size-5" />
-                </button>
+                </Link>
               </div>
             </div>
           </section>

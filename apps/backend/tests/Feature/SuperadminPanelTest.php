@@ -11,7 +11,7 @@ class SuperadminPanelTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_superadmin_opens_organization_management_without_a_dashboard(): void
+    public function test_superadmin_must_configure_mfa_before_opening_organization_management(): void
     {
         Organization::query()->create(['name' => 'EinsatzWerk Pilot']);
         $superadmin = User::query()->create([
@@ -23,8 +23,7 @@ class SuperadminPanelTest extends TestCase
 
         $this->actingAs($superadmin->refresh())
             ->get('/superadmin/organizations')
-            ->assertOk()
-            ->assertSee('Betriebe');
+            ->assertRedirect('/superadmin/multi-factor-authentication/set-up');
 
         $this->assertFalse(
             collect(app('router')->getRoutes())

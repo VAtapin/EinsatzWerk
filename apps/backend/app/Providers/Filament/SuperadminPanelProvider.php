@@ -3,6 +3,7 @@
 namespace App\Providers\Filament;
 
 use App\Filament\Resources\Organizations\OrganizationResource;
+use Filament\Auth\MultiFactor\App\AppAuthentication;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
@@ -28,6 +29,12 @@ class SuperadminPanelProvider extends PanelProvider
             ->path('superadmin')
             ->brandName('EinsatzWerk Superadmin')
             ->login()
+            ->profile()
+            ->multiFactorAuthentication([
+                AppAuthentication::make()
+                    ->recoverable()
+                    ->brandName('EinsatzWerk Superadmin'),
+            ], isRequired: true)
             ->colors([
                 'primary' => Color::Orange,
             ])

@@ -3,7 +3,11 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Models\Asset;
+use App\Models\Customer;
 use App\Models\Product;
+use App\Models\ServiceLocation;
+use App\Models\ServiceOrder;
 use App\Models\StatusHistory;
 use App\Models\Visit;
 use App\Models\VisitDocument;
@@ -18,6 +22,25 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class TechnicianVisitController extends Controller
 {
+    public function index(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'status' => ['nullable', 'string', 'max:64'],
+            'from' => ['nullable', 'date'],
+            'to' => ['nullable', 'date', 'after_or_equal:from'],
+        ]);
+        $visits = $this->queryFor($request)
+            ->when($validated['status'] ?? null, fn ($builder, $status) => $builder->where('status', $status))
+            ->when($validated['from'] ?? null, fn ($builder, $date) => $builder->whereDate('planned_date', '>=', $date))
+            ->when($validated['to'] ?? null, fn ($builder, $date) => $builder->whereDate('planned_date', '<=', $date))
+            ->orderByDesc('planned_start_at')
+            ->limit(100)
+            ->get()
+            ->map($this->payload(...));
+
+        return response()->json(['data' => $visits]);
+    }
+
     public function today(Request $request): JsonResponse
     {
         $validated = $request->validate(['date' => ['nullable', 'date']]);
@@ -244,6 +267,132 @@ class TechnicianVisitController extends Controller
             ->get();
 
         return response()->json(['data' => $products]);
+    }
+
+    public function customers(Request $request): JsonResponse
+    {
+        $query = trim((string) $request->string('q'));
+        $customerIds = Visit::query()
+            ->where('visits.organization_id', $request->user()->organization_id)
+            ->where('visits.technician_id', $request->user()->id)
+            ->join('service_orders', 'service_orders.id', '=', 'visits.service_order_id')
+            ->distinct()
+            ->pluck('service_orders.customer_id');
+        $customers = Customer::query()
+            ->where('organization_id', $request->user()->organization_id)
+            ->whereIn('id', $customerIds)
+            ->when($query !== '', function ($builder) use ($query): void {
+                $like = "%{$query}%";
+                $builder->where(fn ($builder) => $builder
+                    ->whereLike('first_name', $like)
+                    ->orWhereLike('last_name', $like)
+                    ->orWhereLike('company_name', $like)
+                    ->orWhereLike('primary_phone', $like));
+            })
+            ->with(['serviceLocations', 'assets'])
+            ->orderBy('last_name')
+            ->limit(100)
+            ->get();
+
+        return response()->json(['data' => $customers]);
+    }
+
+    public function createEmergency(Request $request): JsonResponse
+    {
+        $organizationId = $request->user()->organization_id;
+        $validated = $request->validate([
+            'customer_id' => [
+                'required',
+                Rule::exists('customers', 'id')->where('organization_id', $organizationId),
+            ],
+            'service_location_id' => [
+                'required',
+                Rule::exists('service_locations', 'id')->where('organization_id', $organizationId),
+            ],
+            'asset_id' => [
+                'nullable',
+                Rule::exists('assets', 'id')->where('organization_id', $organizationId),
+            ],
+            'fault_category' => ['required', 'string', 'max:255'],
+            'fault_description' => ['required', 'string', 'max:5000'],
+            'priority' => ['required', Rule::in(['low', 'normal', 'high', 'urgent'])],
+        ]);
+        abort_unless(
+            ServiceLocation::query()
+                ->whereKey($validated['service_location_id'])
+                ->where('customer_id', $validated['customer_id'])
+                ->exists(),
+            422,
+            'Service location does not belong to customer.',
+        );
+        if ($validated['asset_id'] ?? null) {
+            abort_unless(
+                Asset::query()
+                    ->whereKey($validated['asset_id'])
+                    ->where('customer_id', $validated['customer_id'])
+                    ->exists(),
+                422,
+                'Asset does not belong to customer.',
+            );
+        }
+
+        $visit = DB::transaction(function () use ($request, $organizationId, $validated): Visit {
+            $sequenceDate = today()->toDateString();
+            DB::table('order_number_sequences')->insertOrIgnore([
+                'organization_id' => $organizationId,
+                'sequence_date' => $sequenceDate,
+                'current_value' => 0,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+            $sequenceRow = DB::table('order_number_sequences')
+                ->where('organization_id', $organizationId)
+                ->where('sequence_date', $sequenceDate)
+                ->lockForUpdate()
+                ->first();
+            $sequence = ((int) $sequenceRow->current_value) + 1;
+            DB::table('order_number_sequences')
+                ->where('id', $sequenceRow->id)
+                ->update(['current_value' => $sequence, 'updated_at' => now()]);
+            $order = ServiceOrder::query()->create([
+                ...$validated,
+                'organization_id' => $organizationId,
+                'order_number' => sprintf('A-%s-%03d', now()->format('Ymd'), $sequence),
+                'source' => 'technician',
+                'status' => 'planned',
+                'created_by' => $request->user()->id,
+            ]);
+            $visit = $order->visits()->create([
+                'organization_id' => $organizationId,
+                'technician_id' => $request->user()->id,
+                'planned_date' => today(),
+                'planned_start_at' => now(),
+                'planned_end_at' => now()->addHour(),
+                'dispatcher_duration_minutes' => 60,
+                'status' => 'planned',
+                'visit_number' => 1,
+            ]);
+
+            return $visit;
+        });
+
+        return response()->json(['data' => $this->payload($this->findFor($request, $visit->id))], 201);
+    }
+
+    public function updateProfile(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'phone' => ['nullable', 'string', 'max:255'],
+            'locale' => ['required', 'string', 'in:de,en'],
+            'password' => ['nullable', 'string', 'min:12'],
+        ]);
+        if (blank($validated['password'] ?? null)) {
+            unset($validated['password']);
+        }
+        $request->user()->update($validated);
+
+        return response()->json(['data' => $request->user()->fresh()]);
     }
 
     private function queryFor(Request $request): Builder

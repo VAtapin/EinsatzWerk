@@ -12,16 +12,22 @@ import {
   MapPin,
   MessageSquare,
   PackageOpen,
+  Pencil,
   Plus,
   Search,
   Send,
   Settings,
+  Trash2,
   UserRound,
   Users,
   Wrench,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { apiRequest, getAccessToken } from '@/lib/einsatzwerk-api';
+import {
+  apiDownload,
+  apiRequest,
+  getAccessToken,
+} from '@/lib/einsatzwerk-api';
 
 function useOfficeAccess() {
   const router = useRouter();
@@ -378,13 +384,56 @@ type TechnicianItem = {
 };
 
 export function TechniciansPage() {
-  const router = useOfficeAccess();
+  useOfficeAccess();
   const [items, setItems] = useState<TechnicianItem[]>([]);
-  useEffect(() => {
-    apiRequest<{ data: TechnicianItem[] }>('/technicians/workspace')
-      .then((result) => setItems(result.data))
-      .catch(() => toast.error('Techniker konnten nicht geladen werden.'));
+  const [editing, setEditing] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    status: 'active',
+    password: '',
+  });
+  const load = useCallback(async () => {
+    const result =
+      await apiRequest<{ data: TechnicianItem[] }>('/technicians/workspace');
+    setItems(result.data);
   }, []);
+  useEffect(() => {
+    load().catch(() => toast.error('Techniker konnten nicht geladen werden.'));
+  }, [load]);
+  function openTechnician(technician?: TechnicianItem) {
+    setEditing(technician?.id ?? '');
+    setForm({
+      name: technician?.name ?? '',
+      email: technician?.email ?? '',
+      phone: technician?.phone ?? '',
+      status: technician?.status ?? 'active',
+      password: '',
+    });
+  }
+  async function saveTechnician(event: FormEvent) {
+    event.preventDefault();
+    const isNew = editing === '';
+    setSaving(true);
+    try {
+      await apiRequest(
+        isNew ? '/technicians' : `/technicians/${editing as string}`,
+        {
+          method: isNew ? 'POST' : 'PATCH',
+          body: JSON.stringify(form),
+        },
+      );
+      await load();
+      setEditing(null);
+      toast.success(isNew ? 'Techniker wurde angelegt.' : 'Techniker wurde gespeichert.');
+    } catch {
+      toast.error('Techniker konnte nicht gespeichert werden.');
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <div className="min-w-[1080px] px-6 py-6">
@@ -393,10 +442,10 @@ export function TechniciansPage() {
         description="Techniker verwalten und Einsätze überwachen"
         action={
           <button
-            onClick={() => router.push('/office/planning')}
-            className="h-11 rounded-lg bg-[#061b31] px-5 text-sm font-semibold text-white"
+            onClick={() => openTechnician()}
+            className="flex h-11 items-center gap-2 rounded-lg bg-[#061b31] px-5 text-sm font-semibold text-white"
           >
-            Planung öffnen
+            <Plus className="size-4" /> Neuer Techniker
           </button>
         }
       />
@@ -443,6 +492,7 @@ export function TechniciansPage() {
               <th className="px-4 py-3">Heute</th>
               <th className="px-4 py-3">Offen / Gesamt</th>
               <th className="px-4 py-3">Heutige Einsätze</th>
+              <th className="w-14 px-4 py-3" />
             </tr>
           </thead>
           <tbody>
@@ -479,11 +529,104 @@ export function TechniciansPage() {
                     )}
                   </div>
                 </td>
+                <td className="px-4 py-4">
+                  <button
+                    onClick={() => openTechnician(technician)}
+                    className="rounded-lg border p-2 hover:bg-slate-50"
+                    aria-label={`${technician.name} bearbeiten`}
+                  >
+                    <Pencil className="size-4" />
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </section>
+      {editing !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-6">
+          <form
+            onSubmit={saveTechnician}
+            className="w-full max-w-xl rounded-2xl bg-white shadow-2xl"
+          >
+            <header className="flex items-center justify-between border-b p-5">
+              <h2 className="text-lg font-bold">
+                {editing === '' ? 'Neuer Techniker' : 'Techniker bearbeiten'}
+              </h2>
+              <button
+                type="button"
+                onClick={() => setEditing(null)}
+                className="rounded-lg border px-3 py-2 text-sm"
+              >
+                Schließen
+              </button>
+            </header>
+            <div className="grid grid-cols-2 gap-4 p-5">
+              {[
+                ['name', 'Name', true, 'text'],
+                ['email', 'E-Mail', true, 'email'],
+                ['phone', 'Telefon', false, 'text'],
+                [
+                  'password',
+                  editing === '' ? 'Initiales Passwort' : 'Neues Passwort',
+                  editing === '',
+                  'password',
+                ],
+              ].map(([field, label, required, type]) => (
+                <label key={field as string} className="text-sm font-medium">
+                  {label as string}
+                  <input
+                    required={required as boolean}
+                    minLength={field === 'password' ? 12 : undefined}
+                    type={type as string}
+                    value={form[field as keyof typeof form]}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        [field as string]: event.target.value,
+                      }))
+                    }
+                    className="mt-1 h-11 w-full rounded-lg border px-3"
+                  />
+                </label>
+              ))}
+              {editing !== '' && (
+                <label className="text-sm font-medium">
+                  Status
+                  <select
+                    value={form.status}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        status: event.target.value,
+                      }))
+                    }
+                    className="mt-1 h-11 w-full rounded-lg border bg-white px-3"
+                  >
+                    <option value="active">Aktiv</option>
+                    <option value="inactive">Inaktiv</option>
+                  </select>
+                </label>
+              )}
+            </div>
+            <footer className="flex justify-end gap-3 border-t p-5">
+              <button
+                type="button"
+                onClick={() => setEditing(null)}
+                className="h-11 rounded-lg border px-5"
+              >
+                Abbrechen
+              </button>
+              <button
+                disabled={saving}
+                className="h-11 rounded-lg bg-[#ff5a0a] px-6 font-semibold text-white disabled:opacity-50"
+              >
+                {saving ? 'Speichern…' : 'Speichern'}
+              </button>
+            </footer>
+          </form>
+        </div>
+      )}
     </div>
   );
 }
@@ -506,16 +649,98 @@ type ServiceAreaItem = {
 export function ServiceAreasPage() {
   useOfficeAccess();
   const [items, setItems] = useState<ServiceAreaItem[]>([]);
-  useEffect(() => {
-    apiRequest<{ data: ServiceAreaItem[] }>('/service-areas')
-      .then((result) => setItems(result.data))
-      .catch(() => toast.error('Servicebereiche konnten nicht geladen werden.'));
+  const [editing, setEditing] = useState<string | null>(null);
+  const [postalArea, setPostalArea] = useState<string | null>(null);
+  const [areaForm, setAreaForm] = useState({
+    code: '',
+    name: '',
+    color: '#ff5a0a',
+    active: true,
+  });
+  const [postalForm, setPostalForm] = useState({
+    postal_code: '',
+    city: '',
+    dialing_code: '',
+  });
+  const [saving, setSaving] = useState(false);
+  const load = useCallback(async () => {
+    const result = await apiRequest<{ data: ServiceAreaItem[] }>('/service-areas');
+    setItems(result.data);
   }, []);
+  useEffect(() => {
+    load().catch(() => toast.error('Servicebereiche konnten nicht geladen werden.'));
+  }, [load]);
+  function openArea(area?: ServiceAreaItem) {
+    setEditing(area?.id ?? '');
+    setAreaForm({
+      code: area?.code ?? '',
+      name: area?.name ?? '',
+      color: area?.color ?? '#ff5a0a',
+      active: area?.active ?? true,
+    });
+  }
+  async function saveArea(event: FormEvent) {
+    event.preventDefault();
+    const isNew = editing === '';
+    setSaving(true);
+    try {
+      await apiRequest(
+        isNew ? '/service-areas' : `/service-areas/${editing as string}`,
+        {
+          method: isNew ? 'POST' : 'PATCH',
+          body: JSON.stringify(areaForm),
+        },
+      );
+      await load();
+      setEditing(null);
+      toast.success('Servicebereich wurde gespeichert.');
+    } catch {
+      toast.error('Servicebereich konnte nicht gespeichert werden.');
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function savePostalCode(event: FormEvent) {
+    event.preventDefault();
+    if (!postalArea) return;
+    setSaving(true);
+    try {
+      await apiRequest(`/service-areas/${postalArea}/postal-codes`, {
+        method: 'POST',
+        body: JSON.stringify(postalForm),
+      });
+      await load();
+      setPostalArea(null);
+      toast.success('Postleitzahl wurde zugeordnet.');
+    } catch {
+      toast.error('Postleitzahl konnte nicht zugeordnet werden.');
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function deletePostalCode(areaId: string, postalCodeId: string) {
+    try {
+      await apiRequest(`/service-areas/${areaId}/postal-codes/${postalCodeId}`, {
+        method: 'DELETE',
+      });
+      await load();
+    } catch {
+      toast.error('Postleitzahl konnte nicht entfernt werden.');
+    }
+  }
   return (
     <div className="min-w-[1000px] px-6 py-6">
       <PageHeader
         title="SERVICEBEREICHE"
         description="Gebiete und zugeordnete Postleitzahlen"
+        action={
+          <button
+            onClick={() => openArea()}
+            className="flex h-11 items-center gap-2 rounded-lg bg-[#061b31] px-5 text-sm font-semibold text-white"
+          >
+            <Plus className="size-4" /> Neuer Bereich
+          </button>
+        }
       />
       <div className="grid grid-cols-3 gap-4">
         {items.map((area) => (
@@ -525,22 +750,58 @@ export function ServiceAreasPage() {
                 <div className="font-bold">{area.name}</div>
                 <div className="text-xs text-slate-500">{area.code}</div>
               </div>
-              <span
-                className="size-4 rounded-full"
-                style={{ backgroundColor: area.color || '#ff5a0a' }}
-              />
+              <div className="flex items-center gap-2">
+                <span
+                  className="size-4 rounded-full"
+                  style={{ backgroundColor: area.color || '#ff5a0a' }}
+                />
+                <button
+                  onClick={() => openArea(area)}
+                  className="rounded-lg border p-2"
+                  aria-label={`${area.name} bearbeiten`}
+                >
+                  <Pencil className="size-4" />
+                </button>
+              </div>
             </header>
             <div className="max-h-72 overflow-y-auto p-4">
-              <div className="mb-3 text-xs font-semibold text-slate-500 uppercase">
-                {area.postal_codes_count} Postleitzahlen
+              <div className="mb-3 flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-500 uppercase">
+                  {area.postal_codes_count} Postleitzahlen
+                </span>
+                <button
+                  onClick={() => {
+                    setPostalArea(area.id);
+                    setPostalForm({
+                      postal_code: '',
+                      city: '',
+                      dialing_code: '',
+                    });
+                  }}
+                  className="text-xs font-semibold text-blue-600"
+                >
+                  + PLZ
+                </button>
               </div>
               <div className="grid grid-cols-2 gap-2">
                 {area.postal_codes.map((postalCode) => (
-                  <div key={postalCode.id} className="rounded-lg bg-slate-50 p-2 text-sm">
-                    <strong>{postalCode.postal_code}</strong>
-                    <div className="truncate text-xs text-slate-500">
-                      {postalCode.city || '—'}
+                  <div
+                    key={postalCode.id}
+                    className="flex items-start gap-2 rounded-lg bg-slate-50 p-2 text-sm"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <strong>{postalCode.postal_code}</strong>
+                      <div className="truncate text-xs text-slate-500">
+                        {postalCode.city || '—'}
+                      </div>
                     </div>
+                    <button
+                      onClick={() => deletePostalCode(area.id, postalCode.id)}
+                      className="text-slate-400 hover:text-red-600"
+                      aria-label={`${postalCode.postal_code} entfernen`}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
                   </div>
                 ))}
               </div>
@@ -553,6 +814,139 @@ export function ServiceAreasPage() {
           </div>
         )}
       </div>
+      {editing !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-6">
+          <form
+            onSubmit={saveArea}
+            className="w-full max-w-lg rounded-2xl bg-white shadow-2xl"
+          >
+            <header className="border-b p-5 text-lg font-bold">
+              {editing === '' ? 'Neuer Servicebereich' : 'Servicebereich bearbeiten'}
+            </header>
+            <div className="grid grid-cols-2 gap-4 p-5">
+              <label className="text-sm font-medium">
+                Code
+                <input
+                  required
+                  value={areaForm.code}
+                  onChange={(event) =>
+                    setAreaForm((current) => ({
+                      ...current,
+                      code: event.target.value,
+                    }))
+                  }
+                  className="mt-1 h-11 w-full rounded-lg border px-3"
+                />
+              </label>
+              <label className="text-sm font-medium">
+                Name
+                <input
+                  required
+                  value={areaForm.name}
+                  onChange={(event) =>
+                    setAreaForm((current) => ({
+                      ...current,
+                      name: event.target.value,
+                    }))
+                  }
+                  className="mt-1 h-11 w-full rounded-lg border px-3"
+                />
+              </label>
+              <label className="text-sm font-medium">
+                Farbe
+                <input
+                  type="color"
+                  value={areaForm.color}
+                  onChange={(event) =>
+                    setAreaForm((current) => ({
+                      ...current,
+                      color: event.target.value,
+                    }))
+                  }
+                  className="mt-1 h-11 w-full rounded-lg border p-1"
+                />
+              </label>
+              <label className="flex items-center gap-2 self-end pb-3 text-sm">
+                <input
+                  type="checkbox"
+                  checked={areaForm.active}
+                  onChange={(event) =>
+                    setAreaForm((current) => ({
+                      ...current,
+                      active: event.target.checked,
+                    }))
+                  }
+                />
+                Aktiv
+              </label>
+            </div>
+            <footer className="flex justify-end gap-3 border-t p-5">
+              <button
+                type="button"
+                onClick={() => setEditing(null)}
+                className="h-11 rounded-lg border px-5"
+              >
+                Abbrechen
+              </button>
+              <button
+                disabled={saving}
+                className="h-11 rounded-lg bg-[#ff5a0a] px-6 font-semibold text-white"
+              >
+                Speichern
+              </button>
+            </footer>
+          </form>
+        </div>
+      )}
+      {postalArea && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-6">
+          <form
+            onSubmit={savePostalCode}
+            className="w-full max-w-lg rounded-2xl bg-white shadow-2xl"
+          >
+            <header className="border-b p-5 text-lg font-bold">
+              Postleitzahl zuordnen
+            </header>
+            <div className="grid grid-cols-2 gap-4 p-5">
+              {[
+                ['postal_code', 'PLZ', true],
+                ['city', 'Ort', false],
+                ['dialing_code', 'Vorwahl', false],
+              ].map(([field, label, required]) => (
+                <label key={field as string} className="text-sm font-medium">
+                  {label as string}
+                  <input
+                    required={required as boolean}
+                    value={postalForm[field as keyof typeof postalForm]}
+                    onChange={(event) =>
+                      setPostalForm((current) => ({
+                        ...current,
+                        [field as string]: event.target.value,
+                      }))
+                    }
+                    className="mt-1 h-11 w-full rounded-lg border px-3"
+                  />
+                </label>
+              ))}
+            </div>
+            <footer className="flex justify-end gap-3 border-t p-5">
+              <button
+                type="button"
+                onClick={() => setPostalArea(null)}
+                className="h-11 rounded-lg border px-5"
+              >
+                Abbrechen
+              </button>
+              <button
+                disabled={saving}
+                className="h-11 rounded-lg bg-[#ff5a0a] px-6 font-semibold text-white"
+              >
+                Hinzufügen
+              </button>
+            </footer>
+          </form>
+        </div>
+      )}
     </div>
   );
 }
@@ -576,6 +970,7 @@ type DocumentsData = {
     disk: string;
     path: string;
     created_at: string;
+    original_name: string;
     visit: {
       id: string;
       service_order: {
@@ -666,7 +1061,18 @@ export function DocumentsPage() {
         ) : (
           <div className="divide-y">
             {data.service.map((document) => (
-              <div key={document.id} className="flex items-center gap-4 p-4 text-sm">
+              <button
+                key={document.id}
+                onClick={() =>
+                  apiDownload(
+                    `/documents/service/${document.id}`,
+                    document.original_name,
+                  ).catch(() =>
+                    toast.error('Dokument konnte nicht geladen werden.'),
+                  )
+                }
+                className="flex w-full items-center gap-4 p-4 text-left text-sm hover:bg-slate-50"
+              >
                 <FileText className="size-6 text-red-500" />
                 <div className="flex-1">
                   <div className="font-semibold">
@@ -678,7 +1084,8 @@ export function DocumentsPage() {
                     {new Date(document.created_at).toLocaleString('de-DE')}
                   </div>
                 </div>
-              </div>
+                <FileDown className="size-5 text-slate-400" />
+              </button>
             ))}
           </div>
         )}

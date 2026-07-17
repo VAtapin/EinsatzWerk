@@ -3,6 +3,8 @@
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\CustomerAssetController;
 use App\Http\Controllers\Api\V1\CustomerController;
+use App\Http\Controllers\Api\V1\CustomerDocumentController;
+use App\Http\Controllers\Api\V1\CustomerLocationController;
 use App\Http\Controllers\Api\V1\CustomerSearchController;
 use App\Http\Controllers\Api\V1\DispatchController;
 use App\Http\Controllers\Api\V1\MessageController;
@@ -26,8 +28,15 @@ Route::prefix('v1')->group(function (): void {
             Route::get('office/analytics', [OfficeWorkspaceController::class, 'analytics']);
             Route::get('assets', [OfficeWorkspaceController::class, 'assets']);
             Route::get('technicians/workspace', [OfficeWorkspaceController::class, 'technicians']);
+            Route::post('technicians', [OfficeWorkspaceController::class, 'storeTechnician']);
+            Route::patch('technicians/{technician}', [OfficeWorkspaceController::class, 'updateTechnician']);
             Route::get('service-areas', [OfficeWorkspaceController::class, 'serviceAreas']);
+            Route::post('service-areas', [OfficeWorkspaceController::class, 'storeServiceArea']);
+            Route::patch('service-areas/{serviceArea}', [OfficeWorkspaceController::class, 'updateServiceArea']);
+            Route::post('service-areas/{serviceArea}/postal-codes', [OfficeWorkspaceController::class, 'storePostalCode']);
+            Route::delete('service-areas/{serviceArea}/postal-codes/{postalCode}', [OfficeWorkspaceController::class, 'deletePostalCode']);
             Route::get('documents', [OfficeWorkspaceController::class, 'documents']);
+            Route::get('documents/service/{visitDocument}', [OfficeWorkspaceController::class, 'downloadServiceDocument']);
             Route::get('settings', [OfficeWorkspaceController::class, 'settings']);
             Route::patch('settings', [OfficeWorkspaceController::class, 'updateSettings']);
             Route::get('messages', [MessageController::class, 'index']);
@@ -37,7 +46,13 @@ Route::prefix('v1')->group(function (): void {
             Route::get('customers', [CustomerController::class, 'index']);
             Route::post('customers', [CustomerController::class, 'store']);
             Route::get('customers/{customer}', [CustomerController::class, 'show']);
+            Route::patch('customers/{customer}', [CustomerController::class, 'update']);
+            Route::post('customers/{customer}/locations', [CustomerLocationController::class, 'store']);
+            Route::patch('customers/{customer}/locations/{serviceLocation}', [CustomerLocationController::class, 'update']);
             Route::post('customers/{customer}/assets', [CustomerAssetController::class, 'store']);
+            Route::patch('customers/{customer}/assets/{asset}', [CustomerAssetController::class, 'update']);
+            Route::post('customers/{customer}/documents', [CustomerDocumentController::class, 'store']);
+            Route::get('customers/{customer}/documents/{document}', [CustomerDocumentController::class, 'download']);
             Route::get('service-orders', [ServiceOrderController::class, 'index']);
             Route::post('service-orders', [ServiceOrderController::class, 'store']);
             Route::get('service-orders/{serviceOrder}', [ServiceOrderController::class, 'show']);
@@ -54,8 +69,15 @@ Route::prefix('v1')->group(function (): void {
         Route::prefix('technician')
             ->middleware('ability:technician')
             ->group(function (): void {
+                Route::get('visits', [TechnicianVisitController::class, 'index']);
                 Route::get('today', [TechnicianVisitController::class, 'today']);
                 Route::get('products', [TechnicianVisitController::class, 'products']);
+                Route::get('customers', [TechnicianVisitController::class, 'customers']);
+                Route::post('emergency-visits', [TechnicianVisitController::class, 'createEmergency']);
+                Route::patch('profile', [TechnicianVisitController::class, 'updateProfile']);
+                Route::get('messages', [MessageController::class, 'index']);
+                Route::post('messages', [MessageController::class, 'store']);
+                Route::patch('messages/{message}/read', [MessageController::class, 'read']);
                 Route::get('visits/{visit}', [TechnicianVisitController::class, 'show']);
                 Route::post('visits/{visit}/start', [TechnicianVisitController::class, 'start']);
                 Route::post('visits/{visit}/parts', [TechnicianVisitController::class, 'requestPart']);

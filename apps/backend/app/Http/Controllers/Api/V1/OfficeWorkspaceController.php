@@ -9,12 +9,16 @@ use App\Models\Customer;
 use App\Models\Organization;
 use App\Models\Product;
 use App\Models\ServiceArea;
+use App\Models\ServiceAreaPostalCode;
 use App\Models\ServiceOrder;
 use App\Models\User;
 use App\Models\VisitDocument;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class OfficeWorkspaceController extends Controller
 {
@@ -122,6 +126,62 @@ class OfficeWorkspaceController extends Controller
         return response()->json(['data' => $technicians]);
     }
 
+    public function storeTechnician(Request $request): JsonResponse
+    {
+        $organizationId = $request->user()->organization_id;
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'email' => [
+                'required',
+                'email',
+                'max:255',
+                Rule::unique('users', 'email')->where('organization_id', $organizationId),
+            ],
+            'phone' => ['nullable', 'string', 'max:255'],
+            'password' => ['required', 'string', 'min:12'],
+        ]);
+        $technician = User::query()->create([
+            ...$validated,
+            'organization_id' => $organizationId,
+            'role_code' => 'technician',
+            'status' => 'active',
+            'locale' => 'de',
+        ]);
+
+        return response()->json(['data' => $technician], 201);
+    }
+
+    public function updateTechnician(
+        Request $request,
+        string $technician,
+    ): JsonResponse {
+        $organizationId = $request->user()->organization_id;
+        $technician = User::query()
+            ->where('organization_id', $organizationId)
+            ->where('role_code', 'technician')
+            ->findOrFail($technician);
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'email' => [
+                'required',
+                'email',
+                'max:255',
+                Rule::unique('users', 'email')
+                    ->where('organization_id', $organizationId)
+                    ->ignore($technician->id),
+            ],
+            'phone' => ['nullable', 'string', 'max:255'],
+            'status' => ['required', 'string', 'in:active,inactive'],
+            'password' => ['nullable', 'string', 'min:12'],
+        ]);
+        if (blank($validated['password'] ?? null)) {
+            unset($validated['password']);
+        }
+        $technician->update($validated);
+
+        return response()->json(['data' => $technician->fresh()]);
+    }
+
     public function serviceAreas(Request $request): JsonResponse
     {
         return response()->json(['data' => ServiceArea::query()
@@ -130,6 +190,96 @@ class OfficeWorkspaceController extends Controller
             ->withCount('postalCodes')
             ->orderBy('name')
             ->get()]);
+    }
+
+    public function storeServiceArea(Request $request): JsonResponse
+    {
+        $organizationId = $request->user()->organization_id;
+        $validated = $request->validate([
+            'code' => [
+                'required',
+                'string',
+                'max:64',
+                Rule::unique('service_areas', 'code')->where('organization_id', $organizationId),
+            ],
+            'name' => ['required', 'string', 'max:255'],
+            'color' => ['nullable', 'string', 'max:16'],
+            'active' => ['sometimes', 'boolean'],
+        ]);
+        $area = ServiceArea::query()->create([
+            ...$validated,
+            'organization_id' => $organizationId,
+        ]);
+
+        return response()->json(['data' => $area], 201);
+    }
+
+    public function updateServiceArea(
+        Request $request,
+        string $serviceArea,
+    ): JsonResponse {
+        $organizationId = $request->user()->organization_id;
+        $area = ServiceArea::query()
+            ->where('organization_id', $organizationId)
+            ->findOrFail($serviceArea);
+        $validated = $request->validate([
+            'code' => [
+                'required',
+                'string',
+                'max:64',
+                Rule::unique('service_areas', 'code')
+                    ->where('organization_id', $organizationId)
+                    ->ignore($area->id),
+            ],
+            'name' => ['required', 'string', 'max:255'],
+            'color' => ['nullable', 'string', 'max:16'],
+            'active' => ['required', 'boolean'],
+        ]);
+        $area->update($validated);
+
+        return response()->json(['data' => $area->fresh()]);
+    }
+
+    public function storePostalCode(
+        Request $request,
+        string $serviceArea,
+    ): JsonResponse {
+        $organizationId = $request->user()->organization_id;
+        ServiceArea::query()
+            ->where('organization_id', $organizationId)
+            ->findOrFail($serviceArea);
+        $validated = $request->validate([
+            'postal_code' => [
+                'required',
+                'string',
+                'max:16',
+                Rule::unique('service_area_postal_codes', 'postal_code')
+                    ->where('organization_id', $organizationId),
+            ],
+            'city' => ['nullable', 'string', 'max:255'],
+            'dialing_code' => ['nullable', 'string', 'max:32'],
+        ]);
+        $postalCode = ServiceAreaPostalCode::query()->create([
+            ...$validated,
+            'organization_id' => $organizationId,
+            'service_area_id' => $serviceArea,
+        ]);
+
+        return response()->json(['data' => $postalCode], 201);
+    }
+
+    public function deletePostalCode(
+        Request $request,
+        string $serviceArea,
+        string $postalCode,
+    ): JsonResponse {
+        ServiceAreaPostalCode::query()
+            ->where('organization_id', $request->user()->organization_id)
+            ->where('service_area_id', $serviceArea)
+            ->findOrFail($postalCode)
+            ->delete();
+
+        return response()->json(['message' => 'Postleitzahl entfernt.']);
     }
 
     public function documents(Request $request): JsonResponse
@@ -151,6 +301,20 @@ class OfficeWorkspaceController extends Controller
                 ->limit(100)
                 ->get(),
         ]]);
+    }
+
+    public function downloadServiceDocument(
+        Request $request,
+        string $visitDocument,
+    ): StreamedResponse {
+        $document = VisitDocument::query()
+            ->where('organization_id', $request->user()->organization_id)
+            ->findOrFail($visitDocument);
+
+        return Storage::disk($document->disk)->download(
+            $document->path,
+            $document->original_name,
+        );
     }
 
     public function settings(Request $request): JsonResponse

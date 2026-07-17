@@ -74,6 +74,7 @@ class CustomerController extends Controller
                 'commercialDocuments' => fn ($builder) => $builder
                     ->latest('document_date')
                     ->limit(10),
+                'documents' => fn ($builder) => $builder->latest()->limit(25),
             ])
             ->findOrFail($customer);
 
@@ -179,5 +180,25 @@ class CustomerController extends Controller
                 'assets' => [],
             ],
         ], 201);
+    }
+
+    public function update(Request $request, string $customer): JsonResponse
+    {
+        $customer = Customer::query()
+            ->where('organization_id', $request->user()->organization_id)
+            ->findOrFail($customer);
+        $validated = $request->validate([
+            'first_name' => ['nullable', 'string', 'max:255'],
+            'last_name' => ['required', 'string', 'max:255'],
+            'company_name' => ['nullable', 'string', 'max:255'],
+            'primary_phone' => ['nullable', 'string', 'max:255'],
+            'secondary_phone' => ['nullable', 'string', 'max:255'],
+            'email' => ['nullable', 'email', 'max:255'],
+            'notes' => ['nullable', 'string', 'max:5000'],
+            'status' => ['required', 'string', 'in:active,inactive'],
+        ]);
+        $customer->update($validated);
+
+        return $this->show($request, $customer->id);
     }
 }

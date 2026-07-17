@@ -21,6 +21,8 @@ class CustomerAssetController extends Controller
             'serial_number' => ['nullable', 'string', 'max:255'],
             'production_number' => ['nullable', 'string', 'max:255'],
             'purchase_date' => ['nullable', 'date'],
+            'installation_date' => ['nullable', 'date'],
+            'warranty_until' => ['nullable', 'date'],
             'notes' => ['nullable', 'string', 'max:5000'],
         ]);
         $locationId = $customerModel->serviceLocations()
@@ -36,5 +38,33 @@ class CustomerAssetController extends Controller
         ]);
 
         return response()->json(['data' => $asset], 201);
+    }
+
+    public function update(
+        Request $request,
+        string $customer,
+        string $asset,
+    ): JsonResponse {
+        $organizationId = $request->user()->organization_id;
+        Customer::query()
+            ->where('organization_id', $organizationId)
+            ->findOrFail($customer);
+        $asset = Asset::query()
+            ->where('organization_id', $organizationId)
+            ->where('customer_id', $customer)
+            ->findOrFail($asset);
+        $validated = $request->validate([
+            'model' => ['required', 'string', 'max:255'],
+            'serial_number' => ['nullable', 'string', 'max:255'],
+            'production_number' => ['nullable', 'string', 'max:255'],
+            'purchase_date' => ['nullable', 'date'],
+            'installation_date' => ['nullable', 'date'],
+            'warranty_until' => ['nullable', 'date'],
+            'notes' => ['nullable', 'string', 'max:5000'],
+            'status' => ['required', 'string', 'in:active,inactive'],
+        ]);
+        $asset->update($validated);
+
+        return response()->json(['data' => $asset->fresh()]);
     }
 }

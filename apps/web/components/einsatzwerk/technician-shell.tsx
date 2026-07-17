@@ -1,6 +1,6 @@
 'use client';
 
-import { ReactNode } from 'react';
+import { ReactNode, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
@@ -29,6 +29,32 @@ const nav = [
 export function TechnicianShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
+  const [profile, setProfile] = useState({
+    id: '',
+    name: 'Techniker',
+    email: '',
+  });
+  const [unread, setUnread] = useState(0);
+
+  useEffect(() => {
+    apiRequest<{
+      user: { id: string; name: string; email: string };
+    }>('/auth/me')
+      .then((result) => {
+        setProfile(result.user);
+        return apiRequest<{
+          data: Array<{ read_at: string | null; sender: { id: string } }>;
+        }>('/technician/messages').then((messages) =>
+          setUnread(
+            messages.data.filter(
+              (message) =>
+                message.read_at === null && message.sender.id !== result.user.id,
+            ).length,
+          ),
+        );
+      })
+      .catch(() => null);
+  }, [pathname]);
 
   async function logout() {
     await apiRequest('/auth/logout', { method: 'POST' }).catch(() => null);
@@ -67,9 +93,11 @@ export function TechnicianShell({ children }: { children: ReactNode }) {
           >
             <MessageSquare className="size-6" />
             Nachrichten
-            <span className="ml-auto rounded-full bg-red-500 px-2 py-0.5 text-xs">
-              3
-            </span>
+            {unread > 0 && (
+              <span className="ml-auto rounded-full bg-red-500 px-2 py-0.5 text-xs">
+                {unread}
+              </span>
+            )}
           </Link>
         </nav>
         <div className="border-t border-white/10 p-4">
@@ -82,11 +110,18 @@ export function TechnicianShell({ children }: { children: ReactNode }) {
           </Link>
           <div className="mt-4 flex items-center gap-3">
             <div className="flex size-11 items-center justify-center rounded-full bg-orange-100 font-bold text-[#ff5a0a]">
-              TB
+              {profile.name
+                .split(/\s+/)
+                .slice(0, 2)
+                .map((part) => part[0])
+                .join('')
+                .toUpperCase()}
             </div>
             <div>
-              <div className="font-semibold">Thomas Becker</div>
-              <div className="text-xs text-white/60">T-1001 · Online</div>
+              <div className="font-semibold">{profile.name}</div>
+              <div className="max-w-32 truncate text-xs text-white/60">
+                {profile.email} · Online
+              </div>
             </div>
             <button
               onClick={logout}
@@ -106,13 +141,17 @@ export function TechnicianShell({ children }: { children: ReactNode }) {
           </div>
           <h1 className="hidden text-2xl font-bold lg:block">Meine Einsätze</h1>
           <div className="flex items-center gap-5">
-            <div className="relative">
+            <Link href="/technician/messages" className="relative">
               <Bell className="size-6" />
-              <span className="absolute -top-2 -right-2 flex size-5 items-center justify-center rounded-full bg-[#ff5a0a] text-[10px] font-bold text-white">
-                3
-              </span>
-            </div>
-            <Menu className="size-7 lg:hidden" />
+              {unread > 0 && (
+                <span className="absolute -top-2 -right-2 flex size-5 items-center justify-center rounded-full bg-[#ff5a0a] text-[10px] font-bold text-white">
+                  {unread}
+                </span>
+              )}
+            </Link>
+            <Link href="/technician/more" className="lg:hidden">
+              <Menu className="size-7" />
+            </Link>
           </div>
         </header>
 
