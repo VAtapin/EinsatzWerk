@@ -33,7 +33,7 @@ class DispatchController extends Controller
             ->where('organization_id', $organizationId)
             ->whereIn('status', ['awaiting_scheduling', 'planned'])
             ->whereDoesntHave('visits', fn ($builder) => $builder
-                ->whereNotIn('status', ['cancelled']))
+                ->whereIn('status', ['planned', 'en_route', 'arrived', 'in_progress']))
             ->with(['customer', 'serviceLocation'])
             ->oldest()
             ->get();

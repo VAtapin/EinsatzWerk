@@ -108,6 +108,56 @@ class TechnicianWorkflowApiTest extends TestCase
         $this->getJson("/api/v1/technician/visits/{$visit->id}")->assertNotFound();
     }
 
+    public function test_received_part_returns_the_order_to_follow_up_scheduling(): void
+    {
+        [$organization, $technician, $visit] = $this->assignedVisit();
+        Sanctum::actingAs($technician, ['technician']);
+        $this->postJson("/api/v1/technician/visits/{$visit->id}/start")->assertOk();
+        $requirementId = $this
+            ->postJson("/api/v1/technician/visits/{$visit->id}/parts", [
+                'description' => 'Steuerplatine',
+                'quantity' => 1,
+            ])
+            ->assertCreated()
+            ->json('data.id');
+        $this->postJson("/api/v1/technician/visits/{$visit->id}/complete", [
+            'diagnosis' => 'Steuerplatine defekt.',
+            'work_performed' => 'Fehler geprüft, Ersatzteil identifiziert.',
+            'result' => 'parts_required',
+            'follow_up_required' => true,
+        ])->assertOk()->assertJsonPath('data.status', 'awaiting_parts');
+
+        $dispatcher = User::query()->create([
+            'organization_id' => $organization->id,
+            'name' => 'Sabine Becker',
+            'email' => 'sabine@example.test',
+            'role_code' => 'dispatcher',
+            'password' => 'secret',
+        ]);
+        Sanctum::actingAs($dispatcher, ['office']);
+        $this->patchJson("/api/v1/part-requirements/{$requirementId}", [
+            'status' => 'approved',
+        ])->assertOk()->assertJsonPath('data.status', 'approved');
+        $this->patchJson("/api/v1/part-requirements/{$requirementId}", [
+            'status' => 'ordered',
+            'supplier_reference' => 'BEST-2026-1001',
+        ])->assertOk()->assertJsonPath('data.status', 'ordered');
+        $this->patchJson("/api/v1/part-requirements/{$requirementId}", [
+            'status' => 'received',
+        ])->assertOk()->assertJsonPath('data.status', 'received');
+
+        $this->assertDatabaseHas('service_orders', [
+            'id' => $visit->service_order_id,
+            'status' => 'awaiting_scheduling',
+        ]);
+        $this->getJson('/api/v1/dispatch/board?date='.today()->toDateString())
+            ->assertOk()
+            ->assertJsonPath(
+                'data.unassigned_orders.0.id',
+                $visit->service_order_id,
+            );
+    }
+
     /**
      * @return array{Organization, User, Visit}
      */

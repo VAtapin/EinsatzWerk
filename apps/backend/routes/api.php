@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\V1\CustomerAssetController;
 use App\Http\Controllers\Api\V1\CustomerController;
 use App\Http\Controllers\Api\V1\CustomerSearchController;
 use App\Http\Controllers\Api\V1\DispatchController;
+use App\Http\Controllers\Api\V1\PartRequirementController;
 use App\Http\Controllers\Api\V1\ServiceOrderController;
 use App\Http\Controllers\Api\V1\TechnicianVisitController;
 use Illuminate\Support\Facades\Route;
@@ -29,6 +30,8 @@ Route::prefix('v1')->group(function (): void {
             Route::patch('dispatch/visits/{visit}', [DispatchController::class, 'reschedule']);
             Route::get('dispatch/route', [DispatchController::class, 'route']);
             Route::post('dispatch/route/build', [DispatchController::class, 'buildRoute']);
+            Route::get('part-requirements', [PartRequirementController::class, 'index']);
+            Route::patch('part-requirements/{partRequirement}', [PartRequirementController::class, 'transition']);
         });
 
         Route::prefix('technician')

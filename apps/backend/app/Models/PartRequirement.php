@@ -16,6 +16,9 @@ class PartRequirement extends Model
     {
         return [
             'quantity' => 'decimal:3',
+            'approved_at' => 'datetime',
+            'ordered_at' => 'datetime',
+            'received_at' => 'datetime',
         ];
     }
 
@@ -27,5 +30,20 @@ class PartRequirement extends Model
     public function product(): BelongsTo
     {
         return $this->belongsTo(Product::class);
+    }
+
+    public function serviceOrder(): BelongsTo
+    {
+        return $this->belongsTo(ServiceOrder::class);
+    }
+
+    public function requestedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'requested_by');
+    }
+
+    public function approvedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'approved_by');
     }
 }
