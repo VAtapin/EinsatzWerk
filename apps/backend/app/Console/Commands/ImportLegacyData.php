@@ -26,7 +26,7 @@ class ImportLegacyData extends Command
 {
     protected $signature = 'legacy:import
         {directory : Directory containing Kunden.txt and lsArtikel.txt}
-        {--organization= : Existing organization ULID}
+        {--organization= : Existing organization ULID or slug}
         {--force : Re-run a file whose hash was already imported}';
 
     protected $description = 'Import the current customer legacy export without discarding source values';
@@ -96,7 +96,10 @@ class ImportLegacyData extends Command
         $organizationId = $this->option('organization');
 
         if ($organizationId) {
-            return Organization::query()->findOrFail($organizationId);
+            return Organization::query()
+                ->whereKey($organizationId)
+                ->orWhere('slug', $organizationId)
+                ->firstOrFail();
         }
 
         return Organization::query()->firstOrCreate(
