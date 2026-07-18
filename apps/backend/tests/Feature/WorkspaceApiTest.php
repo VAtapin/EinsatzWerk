@@ -131,7 +131,8 @@ class WorkspaceApiTest extends TestCase
             'source' => 'legacy',
             'status' => 'completed',
             'priority' => 'normal',
-            'fault_description' => 'Historischer Auftrag',
+            'fault_description' => '',
+            'preferred_date' => '2017-04-28',
             'closed_at' => '2017-04-28 00:00:00',
         ]);
         $item = ServiceOrderItem::query()->create([
@@ -173,11 +174,13 @@ class WorkspaceApiTest extends TestCase
         $this->getJson('/api/v1/service-orders?q=Kühl-Gefrierkombination')
             ->assertOk()
             ->assertJsonPath('data.0.id', $order->id)
-            ->assertJsonPath('data.0.items_count', 1);
+            ->assertJsonPath('data.0.items_count', 1)
+            ->assertJsonPath('data.0.gross_total', 499);
         $this->getJson("/api/v1/service-orders/{$order->id}")
             ->assertOk()
             ->assertJsonPath('data.items.0.id', $item->id)
-            ->assertJsonPath('data.items.0.assets.0.id', $asset->id);
+            ->assertJsonPath('data.items.0.assets.0.id', $asset->id)
+            ->assertJsonPath('data.gross_total', 499);
         $this->getJson('/api/v1/assets?q=L3821')
             ->assertOk()
             ->assertJsonPath('data.0.id', $asset->id)
@@ -189,6 +192,48 @@ class WorkspaceApiTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.customer', [])
             ->assertJsonPath('data.service', []);
+    }
+
+    public function test_customer_detail_returns_all_orders_with_totals(): void
+    {
+        [$organization, $dispatcher, , $customer, $location] = $this->workspace();
+
+        foreach (range(1, 12) as $sequence) {
+            $order = ServiceOrder::query()->create([
+                'organization_id' => $organization->id,
+                'order_number' => "L{$sequence}",
+                'legacy_order_number' => "L{$sequence}",
+                'customer_id' => $customer->id,
+                'service_location_id' => $location->id,
+                'source' => 'legacy',
+                'status' => 'completed',
+                'priority' => 'normal',
+                'fault_description' => '',
+                'preferred_date' => "2017-04-{$sequence}",
+            ]);
+            ServiceOrderItem::query()->create([
+                'organization_id' => $organization->id,
+                'service_order_id' => $order->id,
+                'customer_id' => $customer->id,
+                'source_row' => $sequence,
+                'legacy_number' => "L{$sequence}",
+                'description' => 'Arbeitsleistung',
+                'quantity' => 2,
+                'gross_unit_price' => 12.5,
+                'legacy_customer_number' => 'K-10041',
+                'classification' => 'labor',
+                'classification_confidence' => 'high',
+                'classification_reason' => 'Test',
+                'legacy_data' => [],
+            ]);
+        }
+
+        Sanctum::actingAs($dispatcher, ['office']);
+
+        $this->getJson("/api/v1/customers/{$customer->id}")
+            ->assertOk()
+            ->assertJsonCount(12, 'data.service_orders')
+            ->assertJsonPath('data.service_orders.0.gross_total', 25);
     }
 
     private function workspace(): array

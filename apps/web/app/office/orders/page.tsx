@@ -6,7 +6,6 @@ import {
   Ban,
   CalendarDays,
   Check,
-  ChevronRight,
   Clock3,
   Eye,
   Filter,
@@ -25,6 +24,29 @@ type Technician = {
   phone: string | null;
 };
 
+type OrderItem = {
+  id: string;
+  legacy_art: string | null;
+  article_number: string | null;
+  code: string | null;
+  line_date: string | null;
+  description: string | null;
+  additional_text: string | null;
+  quantity: string | null;
+  net_unit_price: string | null;
+  gross_unit_price: string | null;
+  serial_number: string | null;
+  classification: string;
+  classification_confidence: string;
+  device_type: string | null;
+  assets: Array<{
+    id: string;
+    model: string | null;
+    serial_number: string | null;
+    status: string;
+  }>;
+};
+
 type Order = {
   id: string;
   order_number: string;
@@ -36,7 +58,10 @@ type Order = {
   fault_category: string | null;
   customer_message: string | null;
   dispatcher_notes: string | null;
+  preferred_date: string | null;
+  gross_total: number | string;
   created_at: string;
+  items: OrderItem[];
   customer: {
     id: string;
     first_name: string | null;
@@ -68,28 +93,6 @@ type OrderDetail = Order & {
     starts_at: string;
     ends_at: string | null;
     is_hard: boolean;
-  }>;
-  items: Array<{
-    id: string;
-    legacy_art: string | null;
-    article_number: string | null;
-    code: string | null;
-    line_date: string | null;
-    description: string | null;
-    additional_text: string | null;
-    quantity: string | null;
-    net_unit_price: string | null;
-    gross_unit_price: string | null;
-    serial_number: string | null;
-    classification: string;
-    classification_confidence: string;
-    device_type: string | null;
-    assets: Array<{
-      id: string;
-      model: string | null;
-      serial_number: string | null;
-      status: string;
-    }>;
   }>;
 };
 
@@ -169,6 +172,38 @@ function location(order: Order): string {
     .join(' ');
 }
 
+function orderDate(order: Order): Date {
+  return new Date(order.preferred_date || order.created_at);
+}
+
+function orderSummary(order: Order): string {
+  const descriptions = Array.from(
+    new Set(
+      order.items
+        .filter(
+          (item) =>
+            item.classification !== 'structural' && item.description?.trim(),
+        )
+        .map((item) => item.description?.trim() as string),
+    ),
+  );
+
+  if (descriptions.length) {
+    return descriptions.slice(0, 2).join(' · ');
+  }
+
+  return order.fault_description?.trim() || 'Keine Beschreibung';
+}
+
+function formatMoney(value: number | string | null | undefined): string {
+  if (value === null || value === undefined || value === '') return '—';
+
+  return Number(value).toLocaleString('de-DE', {
+    style: 'currency',
+    currency: 'EUR',
+  });
+}
+
 function localInputValue(date: Date): string {
   const offset = date.getTimezoneOffset() * 60_000;
   return new Date(date.getTime() - offset).toISOString().slice(0, 16);
@@ -215,19 +250,26 @@ export default function OrdersPage() {
         `/service-orders?${params.toString()}`,
       );
       setOrders(result.data);
+      const requestedOrder =
+        typeof window === 'undefined'
+          ? null
+          : new URLSearchParams(window.location.search).get('order');
+      const shouldOpen =
+        typeof window !== 'undefined' &&
+        new URLSearchParams(window.location.search).get('open') === '1';
       setSelectedId((current) =>
-        result.data.some(
-          (order) =>
-            order.id ===
-            (typeof window === 'undefined'
-              ? current
-              : new URLSearchParams(window.location.search).get('order')),
-        )
-          ? (new URLSearchParams(window.location.search).get('order') as string)
+        result.data.some((order) => order.id === requestedOrder)
+          ? (requestedOrder as string)
           : result.data.some((order) => order.id === current)
             ? current
             : (result.data[0]?.id ?? ''),
       );
+      if (
+        shouldOpen &&
+        result.data.some((order) => order.id === requestedOrder)
+      ) {
+        setShowDetails(true);
+      }
     } catch (error) {
       const statusCode = (error as Error & { status?: number }).status;
       if (statusCode === 401 || statusCode === 403) router.replace('/login');
@@ -391,7 +433,7 @@ export default function OrdersPage() {
               className="mt-1 block h-10 min-w-52 rounded-lg border bg-white px-3 text-sm"
             >
               <option value="">Alle Aufträge</option>
-              <option value="legacy">Historische Aufträge</option>
+              <option value="legacy">Datenübernahme</option>
               <option value="phone">Telefonannahme</option>
               <option value="manual">Manuell</option>
               <option value="technician">Techniker</option>
@@ -416,93 +458,80 @@ export default function OrdersPage() {
             <thead className="bg-slate-50 text-left text-xs text-slate-500">
               <tr>
                 <th className="px-4 py-3">Auftrag</th>
+                <th className="px-4 py-3">Datum</th>
                 <th className="px-4 py-3">Kunde / Adresse</th>
-                <th className="px-4 py-3">Problem</th>
-                <th className="px-4 py-3">Termin / Techniker</th>
+                <th className="px-4 py-3">Inhalt</th>
+                <th className="px-4 py-3 text-right">Positionen</th>
+                <th className="px-4 py-3 text-right">Gesamt brutto</th>
                 <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Priorität</th>
                 <th className="w-12 px-3 py-3" />
               </tr>
             </thead>
             <tbody>
-              {orders.map((order) => {
-                const visit = order.visits[0];
-                return (
-                  <tr
-                    key={order.id}
-                    onClick={() => setSelectedId(order.id)}
-                    className={`cursor-pointer border-t ${
-                      selected?.id === order.id
-                        ? 'bg-orange-50/70'
-                        : 'hover:bg-slate-50'
-                    }`}
-                  >
-                    <td className="px-4 py-4 font-medium">
-                      {order.order_number}
-                    </td>
-                    <td className="px-4 py-4">
-                      <strong className="block">{customerName(order)}</strong>
-                      <span className="text-xs text-slate-500">
-                        {location(order)}
-                      </span>
-                    </td>
-                    <td className="max-w-64 px-4 py-4">
-                      {order.source === 'legacy' ? (
-                        <>
-                          <span className="line-clamp-2 font-medium">
-                            Historischer Auftrag
-                          </span>
-                          <span className="text-xs text-slate-500">
-                            {order.items_count} Positionen
-                          </span>
-                        </>
-                      ) : (
-                        <span className="line-clamp-2">
-                          {order.fault_description}
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-4">
-                      {visit ? (
-                        <>
-                          <strong className="block">
-                            {new Date(
-                              visit.planned_start_at as string,
-                            ).toLocaleString('de-DE', {
-                              day: '2-digit',
-                              month: '2-digit',
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
-                          </strong>
-                          <span className="text-xs text-slate-500">
-                            {visit.technician?.name}
-                          </span>
-                        </>
-                      ) : (
-                        <span className="text-slate-400">Nicht geplant</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-4">
+              {orders.map((order) => (
+                <tr
+                  key={order.id}
+                  onClick={() => {
+                    setSelectedId(order.id);
+                    setShowDetails(true);
+                  }}
+                  className={`cursor-pointer border-t ${
+                    selected?.id === order.id
+                      ? 'bg-orange-50/70'
+                      : 'hover:bg-slate-50'
+                  }`}
+                >
+                  <td className="px-4 py-4 font-medium">
+                    {order.order_number}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-4">
+                    {orderDate(order).toLocaleDateString('de-DE')}
+                  </td>
+                  <td className="px-4 py-4">
+                    <strong className="block">{customerName(order)}</strong>
+                    <span className="text-xs text-slate-500">
+                      {location(order)}
+                    </span>
+                  </td>
+                  <td className="max-w-64 px-4 py-4">
+                    <span className="line-clamp-2">{orderSummary(order)}</span>
+                  </td>
+                  <td className="px-4 py-4 text-right tabular-nums">
+                    {order.items_count}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-4 text-right font-semibold tabular-nums">
+                    {formatMoney(order.gross_total)}
+                  </td>
+                  <td className="px-4 py-4">
+                    <span
+                      className={`rounded px-2 py-1 text-xs ${statusStyle[order.status] ?? 'bg-slate-100'}`}
+                    >
+                      {statusLabel[order.status] ?? order.status}
+                    </span>
+                    {order.source !== 'legacy' && (
                       <span
-                        className={`rounded px-2 py-1 text-xs ${statusStyle[order.status] ?? 'bg-slate-100'}`}
-                      >
-                        {statusLabel[order.status] ?? order.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-4">
-                      <span
-                        className={`rounded px-2 py-1 text-xs ${priorityStyle[order.priority] ?? ''}`}
+                        className={`ml-2 rounded px-2 py-1 text-xs ${priorityStyle[order.priority] ?? ''}`}
                       >
                         {priorityLabel[order.priority] ?? order.priority}
                       </span>
-                    </td>
-                    <td className="px-3 py-4">
-                      <Eye className="size-4 text-slate-500" />
-                    </td>
-                  </tr>
-                );
-              })}
+                    )}
+                  </td>
+                  <td className="px-3 py-4">
+                    <button
+                      type="button"
+                      aria-label={`Auftrag ${order.order_number} öffnen`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setSelectedId(order.id);
+                        setShowDetails(true);
+                      }}
+                      className="rounded-lg border p-2 text-slate-500 hover:border-[#ff5a0a] hover:text-[#ff5a0a]"
+                    >
+                      <Eye className="size-4" />
+                    </button>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
           {!loading && orders.length === 0 && (
@@ -526,57 +555,71 @@ export default function OrdersPage() {
                   <MapPin className="mt-0.5 size-4 shrink-0" />
                   {location(selected)}
                 </p>
-                <p className="mt-4 text-sm">
-                  {selected.source === 'legacy'
-                    ? `${selected.items_count} historische Positionen`
-                    : selected.fault_description}
-                </p>
+                <p className="mt-4 text-sm">{orderSummary(selected)}</p>
+                <div className="mt-4 grid grid-cols-3 gap-3 text-xs">
+                  <div>
+                    <span className="block text-slate-500">Datum</span>
+                    <strong>
+                      {orderDate(selected).toLocaleDateString('de-DE')}
+                    </strong>
+                  </div>
+                  <div>
+                    <span className="block text-slate-500">Positionen</span>
+                    <strong>{selected.items_count}</strong>
+                  </div>
+                  <div>
+                    <span className="block text-slate-500">Gesamt</span>
+                    <strong>{formatMoney(selected.gross_total)}</strong>
+                  </div>
+                </div>
               </div>
               {selected.source !== 'legacy' &&
               !['completed', 'cancelled'].includes(selected.status) ? (
                 <div className="space-y-4 p-5">
-                <div className="flex items-center gap-2 text-sm font-semibold">
-                  <CalendarDays className="size-4 text-[#ff5a0a]" />
-                  Einsatz planen
-                </div>
-                <label className="block text-xs font-medium">Techniker</label>
-                <select
-                  value={technicianId}
-                  onChange={(event) => setTechnicianId(event.target.value)}
-                  className="h-11 w-full rounded-lg border px-3"
-                >
-                  {technicians.map((technician) => (
-                    <option key={technician.id} value={technician.id}>
-                      {technician.name}
-                    </option>
-                  ))}
-                </select>
-                <label className="block text-xs font-medium">Beginn</label>
-                <input
-                  type="datetime-local"
-                  value={start}
-                  onChange={(event) => setStart(event.target.value)}
-                  className="h-11 w-full rounded-lg border px-3"
-                />
-                <label className="block text-xs font-medium">
-                  Dauer in Minuten
-                </label>
-                <input
-                  type="number"
-                  min={5}
-                  max={1440}
-                  value={duration}
-                  onChange={(event) => setDuration(Number(event.target.value))}
-                  className="h-11 w-full rounded-lg border px-3"
-                />
-                <button
-                  onClick={assign}
-                  disabled={saving || !technicianId}
-                  className="flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#ff5a0a] font-semibold text-white disabled:opacity-50"
-                >
-                  <Check className="size-5" />
-                  {saving ? 'Speichern…' : 'Techniker zuweisen'}
-                </button>
+                  <div className="flex items-center gap-2 text-sm font-semibold">
+                    <CalendarDays className="size-4 text-[#ff5a0a]" />
+                    Einsatz planen
+                  </div>
+                  <label className="block text-xs font-medium">Techniker</label>
+                  <select
+                    value={technicianId}
+                    onChange={(event) => setTechnicianId(event.target.value)}
+                    className="h-11 w-full rounded-lg border px-3"
+                  >
+                    {technicians.map((technician) => (
+                      <option key={technician.id} value={technician.id}>
+                        {technician.name}
+                      </option>
+                    ))}
+                  </select>
+                  <label className="block text-xs font-medium">Beginn</label>
+                  <input
+                    type="datetime-local"
+                    value={start}
+                    onChange={(event) => setStart(event.target.value)}
+                    className="h-11 w-full rounded-lg border px-3"
+                  />
+                  <label className="block text-xs font-medium">
+                    Dauer in Minuten
+                  </label>
+                  <input
+                    type="number"
+                    min={5}
+                    max={1440}
+                    value={duration}
+                    onChange={(event) =>
+                      setDuration(Number(event.target.value))
+                    }
+                    className="h-11 w-full rounded-lg border px-3"
+                  />
+                  <button
+                    onClick={assign}
+                    disabled={saving || !technicianId}
+                    className="flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#ff5a0a] font-semibold text-white disabled:opacity-50"
+                  >
+                    <Check className="size-5" />
+                    {saving ? 'Speichern…' : 'Techniker zuweisen'}
+                  </button>
                   <button
                     onClick={() => setCancelOpen(true)}
                     className="flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-red-200 font-semibold text-red-600 hover:bg-red-50"
@@ -587,28 +630,24 @@ export default function OrdersPage() {
               ) : (
                 <div className="p-5 text-sm text-slate-600">
                   <div className="rounded-lg bg-emerald-50 p-4">
-                    Dieser Auftrag ist abgeschlossen und dient als
-                    Kundenhistorie.
+                    Auftrag{' '}
+                    {statusLabel[selected.status]?.toLowerCase() ??
+                      selected.status}
+                    . Alle Positionen sind über die Tabelle oder das Auge
+                    einsehbar.
                   </div>
                 </div>
               )}
-              <div className="grid grid-cols-2 border-t text-sm">
+              <div className="border-t text-sm">
                 <button
                   onClick={() =>
                     router.push(
                       `/office/customers?customer=${selected.customer.id}`,
                     )
                   }
-                  className="flex items-center justify-center gap-2 border-r p-4"
+                  className="flex w-full items-center justify-center gap-2 p-4"
                 >
                   <UserRound className="size-4" /> Kunde
-                </button>
-                <button
-                  onClick={() => setShowDetails(true)}
-                  className="flex items-center justify-center gap-2 p-4"
-                >
-                  <Wrench className="size-4" /> Details
-                  <ChevronRight className="size-4" />
                 </button>
               </div>
             </>
@@ -720,17 +759,43 @@ export default function OrdersPage() {
               </button>
             </header>
             <div className="grid grid-cols-2 gap-5 p-6 text-sm">
-              <div className="rounded-xl border p-4">
-                <div className="text-xs font-semibold text-slate-500 uppercase">
-                  Problem
+              {detail.source === 'legacy' ? (
+                <div className="rounded-xl border p-4">
+                  <div className="text-xs font-semibold text-slate-500 uppercase">
+                    Auftragsübersicht
+                  </div>
+                  <dl className="mt-3 grid grid-cols-2 gap-3">
+                    <div>
+                      <dt className="text-xs text-slate-500">Datum</dt>
+                      <dd className="font-semibold">
+                        {orderDate(detail).toLocaleDateString('de-DE')}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-slate-500">Positionen</dt>
+                      <dd className="font-semibold">{detail.items.length}</dd>
+                    </div>
+                    <div className="col-span-2">
+                      <dt className="text-xs text-slate-500">Gesamt brutto</dt>
+                      <dd className="text-lg font-bold">
+                        {formatMoney(detail.gross_total)}
+                      </dd>
+                    </div>
+                  </dl>
                 </div>
-                <div className="mt-2 font-semibold">
-                  {detail.fault_category || 'Ohne Kategorie'}
+              ) : (
+                <div className="rounded-xl border p-4">
+                  <div className="text-xs font-semibold text-slate-500 uppercase">
+                    Problem
+                  </div>
+                  <div className="mt-2 font-semibold">
+                    {detail.fault_category || 'Ohne Kategorie'}
+                  </div>
+                  <p className="mt-2 whitespace-pre-wrap">
+                    {detail.fault_description}
+                  </p>
                 </div>
-                <p className="mt-2 whitespace-pre-wrap">
-                  {detail.fault_description}
-                </p>
-              </div>
+              )}
               <div className="rounded-xl border p-4">
                 <div className="text-xs font-semibold text-slate-500 uppercase">
                   Status

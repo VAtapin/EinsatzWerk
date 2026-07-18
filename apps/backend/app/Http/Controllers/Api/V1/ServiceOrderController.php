@@ -67,10 +67,16 @@ class ServiceOrderController extends Controller
                 'visits' => fn ($builder) => $builder
                     ->with('technician')
                     ->orderByDesc('visit_number'),
+                'items' => fn ($builder) => $builder
+                    ->orderBy('source_row'),
             ])
             ->withCount('items')
             ->latest()
             ->paginate($validated['per_page'] ?? 25);
+
+        $orders->getCollection()->each(
+            fn (ServiceOrder $order) => $this->appendOrderTotals($order),
+        );
 
         return response()->json($orders);
     }
@@ -78,14 +84,16 @@ class ServiceOrderController extends Controller
     public function show(Request $request, string $serviceOrder): JsonResponse
     {
         return response()->json([
-            'data' => $this->findForOrganization($request, $serviceOrder)->load([
-                'customer',
-                'serviceLocation',
-                'asset.manufacturer',
-                'appointmentConstraints',
-                'visits.technician',
-                'items.assets:id,source_order_item_id,model,serial_number,status',
-            ]),
+            'data' => $this->appendOrderTotals(
+                $this->findForOrganization($request, $serviceOrder)->load([
+                    'customer',
+                    'serviceLocation',
+                    'asset.manufacturer',
+                    'appointmentConstraints',
+                    'visits.technician',
+                    'items.assets:id,source_order_item_id,model,serial_number,status',
+                ]),
+            ),
         ]);
     }
 
@@ -318,5 +326,18 @@ class ServiceOrderController extends Controller
         return ServiceOrder::query()
             ->where('organization_id', $request->user()->organization_id)
             ->findOrFail($id);
+    }
+
+    private function appendOrderTotals(ServiceOrder $order): ServiceOrder
+    {
+        $order->setAttribute(
+            'gross_total',
+            round($order->items->sum(
+                fn ($item) => (float) ($item->quantity ?? 1)
+                    * (float) ($item->gross_unit_price ?? 0),
+            ), 2),
+        );
+
+        return $order;
     }
 }

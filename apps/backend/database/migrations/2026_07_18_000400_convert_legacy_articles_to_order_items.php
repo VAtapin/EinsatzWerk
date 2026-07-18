@@ -151,10 +151,6 @@ return new class extends Migration
                     $orderTimestamp = $document->document_date
                         ? $document->document_date.' 00:00:00'
                         : ($document->created_at ?: now());
-                    $lineCount = DB::table('commercial_document_lines')
-                        ->where('commercial_document_id', $document->id)
-                        ->count();
-
                     DB::table('service_orders')->insert([
                         'id' => $orderId,
                         'organization_id' => $document->organization_id,
@@ -167,7 +163,7 @@ return new class extends Migration
                         'source' => 'legacy',
                         'priority' => 'normal',
                         'status' => 'completed',
-                        'fault_description' => "Historischer Auftrag mit {$lineCount} Positionen",
+                        'fault_description' => '',
                         'customer_message' => null,
                         'dispatcher_notes' => 'Aus lsArtikel.txt übernommen.',
                         'preferred_date' => $document->document_date,

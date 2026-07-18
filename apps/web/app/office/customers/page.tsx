@@ -16,11 +16,7 @@ import {
   UserRound,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import {
-  apiDownload,
-  apiRequest,
-  getAccessToken,
-} from '@/lib/einsatzwerk-api';
+import { apiDownload, apiRequest, getAccessToken } from '@/lib/einsatzwerk-api';
 
 type Location = {
   id: string;
@@ -72,14 +68,24 @@ type ServiceOrder = {
   fault_description: string;
   status: string;
   source: string;
+  preferred_date: string | null;
+  gross_total: number | string;
   created_at: string;
-  asset: { id: string; model: string | null; serial_number: string | null } | null;
+  asset: {
+    id: string;
+    model: string | null;
+    serial_number: string | null;
+  } | null;
   items: Array<{
     id: string;
     classification: string;
     description: string | null;
     additional_text: string | null;
-    assets: Array<{ id: string; model: string | null; serial_number: string | null }>;
+    assets: Array<{
+      id: string;
+      model: string | null;
+      serial_number: string | null;
+    }>;
   }>;
 };
 
@@ -102,7 +108,9 @@ type CustomerDetail = CustomerListItem & {
   documents: CustomerDocument[];
 };
 
-function displayName(customer: Pick<CustomerListItem, 'company_name' | 'first_name' | 'last_name'>) {
+function displayName(
+  customer: Pick<CustomerListItem, 'company_name' | 'first_name' | 'last_name'>,
+) {
   return (
     customer.company_name ||
     [customer.first_name, customer.last_name].filter(Boolean).join(' ')
@@ -117,6 +125,51 @@ function address(location?: Location) {
   ]
     .filter(Boolean)
     .join(', ');
+}
+
+function serviceOrderDate(order: ServiceOrder): Date {
+  return new Date(order.preferred_date || order.created_at);
+}
+
+function serviceOrderSummary(order: ServiceOrder): string {
+  const descriptions = Array.from(
+    new Set(
+      order.items
+        .filter(
+          (item) =>
+            item.classification !== 'structural' && item.description?.trim(),
+        )
+        .map((item) => item.description?.trim() as string),
+    ),
+  );
+
+  if (descriptions.length) return descriptions.slice(0, 2).join(' · ');
+
+  return order.fault_description?.trim() || 'Keine Beschreibung';
+}
+
+function formatMoney(value: number | string | null | undefined): string {
+  if (value === null || value === undefined || value === '') return '—';
+
+  return Number(value).toLocaleString('de-DE', {
+    style: 'currency',
+    currency: 'EUR',
+  });
+}
+
+function assetLabel(asset: Asset): string {
+  return (
+    [asset.manufacturer?.name, asset.model].filter(Boolean).join(' ').trim() ||
+    'Gerät ohne Bezeichnung'
+  );
+}
+
+function assetGroupKey(asset: Asset): string {
+  return [asset.manufacturer?.name ?? '', asset.model ?? '']
+    .join(' ')
+    .trim()
+    .toLocaleLowerCase('de-DE')
+    .replace(/\s+/g, ' ');
 }
 
 const orderStatus: Record<string, string> = {
@@ -138,11 +191,12 @@ export default function CustomersPage() {
   const [loading, setLoading] = useState(true);
   const [requestedCustomerId, setRequestedCustomerId] = useState('');
   const [requestedView, setRequestedView] = useState('');
-  const [editor, setEditor] = useState<'customer' | 'location' | 'asset' | null>(
-    null,
-  );
+  const [editor, setEditor] = useState<
+    'customer' | 'location' | 'asset' | null
+  >(null);
   const [saving, setSaving] = useState(false);
   const [uploadingDocument, setUploadingDocument] = useState(false);
+  const [expandedAssetGroup, setExpandedAssetGroup] = useState('');
   const [customerForm, setCustomerForm] = useState({
     first_name: '',
     last_name: '',
@@ -201,7 +255,7 @@ export default function CustomersPage() {
           ? current
           : result.data.some((customer) => customer.id === requestedCustomerId)
             ? requestedCustomerId
-          : (result.data[0]?.id ?? ''),
+            : (result.data[0]?.id ?? ''),
       );
     } catch (error) {
       const status = (error as Error & { status?: number }).status;
@@ -235,7 +289,9 @@ export default function CustomersPage() {
     if (!detail || !requestedView) return;
     document
       .getElementById(
-        requestedView === 'documents' ? 'customer-documents' : 'customer-history',
+        requestedView === 'documents'
+          ? 'customer-documents'
+          : 'customer-history',
       )
       ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [detail, requestedView]);
@@ -246,6 +302,28 @@ export default function CustomersPage() {
       detail?.service_locations[0],
     [detail],
   );
+
+  const assetGroups = useMemo(() => {
+    const groups = new Map<string, { label: string; assets: Asset[] }>();
+
+    for (const asset of detail?.assets ?? []) {
+      const key = assetGroupKey(asset) || `asset-${asset.id}`;
+      const current = groups.get(key);
+      if (current) {
+        current.assets.push(asset);
+      } else {
+        groups.set(key, { label: assetLabel(asset), assets: [asset] });
+      }
+    }
+
+    return Array.from(groups.entries())
+      .map(([key, group]) => ({ key, ...group }))
+      .sort(
+        (left, right) =>
+          right.assets.length - left.assets.length ||
+          left.label.localeCompare(right.label, 'de'),
+      );
+  }, [detail?.assets]);
 
   async function refreshDetail() {
     if (!selectedId) return;
@@ -340,7 +418,9 @@ export default function CustomersPage() {
       );
       await refreshDetail();
       setEditor(null);
-      toast.success(id ? 'Gerät wurde aktualisiert.' : 'Gerät wurde hinzugefügt.');
+      toast.success(
+        id ? 'Gerät wurde aktualisiert.' : 'Gerät wurde hinzugefügt.',
+      );
     } catch {
       toast.error('Gerät konnte nicht gespeichert werden.');
     } finally {
@@ -385,20 +465,24 @@ export default function CustomersPage() {
       </div>
 
       <div className="mb-4 flex gap-7 border-b">
-        {['Kunden', 'Geräte', 'Techniker', 'Servicebereiche', 'Lager & Teile'].map(
-          (tab, index) => (
-            <button
-              key={tab}
-              className={`border-b-2 px-1 pb-3 text-sm ${
-                index === 0
-                  ? 'border-[#ff5a0a] font-semibold text-[#ff5a0a]'
-                  : 'border-transparent text-slate-500'
-              }`}
-            >
-              {tab}
-            </button>
-          ),
-        )}
+        {[
+          'Kunden',
+          'Geräte',
+          'Techniker',
+          'Servicebereiche',
+          'Lager & Teile',
+        ].map((tab, index) => (
+          <button
+            key={tab}
+            className={`border-b-2 px-1 pb-3 text-sm ${
+              index === 0
+                ? 'border-[#ff5a0a] font-semibold text-[#ff5a0a]'
+                : 'border-transparent text-slate-500'
+            }`}
+          >
+            {tab}
+          </button>
+        ))}
       </div>
 
       <div className="grid grid-cols-[300px_1fr_350px] gap-4">
@@ -427,8 +511,9 @@ export default function CustomersPage() {
                 }`}
               >
                 <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-sm font-bold text-slate-600">
-                  {(customer.first_name?.[0] ?? customer.company_name?.[0] ?? '') +
-                    customer.last_name[0]}
+                  {(customer.first_name?.[0] ??
+                    customer.company_name?.[0] ??
+                    '') + customer.last_name[0]}
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-semibold">
@@ -464,7 +549,9 @@ export default function CustomersPage() {
                     </div>
                     <div>
                       <div className="flex items-center gap-3">
-                        <h2 className="text-xl font-bold">{displayName(detail)}</h2>
+                        <h2 className="text-xl font-bold">
+                          {displayName(detail)}
+                        </h2>
                         <span className="rounded bg-emerald-100 px-2 py-1 text-xs text-emerald-700">
                           Aktiv
                         </span>
@@ -488,7 +575,9 @@ export default function CustomersPage() {
                   <div className="flex items-center gap-3">
                     <Phone className="size-4 text-slate-400" />
                     {detail.primary_phone ? (
-                      <a href={`tel:${detail.primary_phone}`}>{detail.primary_phone}</a>
+                      <a href={`tel:${detail.primary_phone}`}>
+                        {detail.primary_phone}
+                      </a>
                     ) : (
                       <span>—</span>
                     )}
@@ -522,7 +611,9 @@ export default function CustomersPage() {
                 className="scroll-mt-24 rounded-xl border bg-white"
               >
                 <div className="flex items-center justify-between border-b p-4">
-                  <h3 className="font-bold">Serviceadressen ({detail.service_locations.length})</h3>
+                  <h3 className="font-bold">
+                    Serviceadressen ({detail.service_locations.length})
+                  </h3>
                   <button
                     onClick={() => {
                       setLocationForm({
@@ -545,69 +636,98 @@ export default function CustomersPage() {
                   </button>
                 </div>
                 <div className="grid grid-cols-2 divide-x">
-                  {detail.service_locations.slice(0, 2).map((location, index) => (
-                    <div key={location.id} className="p-4 text-sm">
-                      <div className="mb-2 flex items-center gap-2 font-semibold">
-                        <span className="flex size-5 items-center justify-center rounded-full bg-orange-100 text-xs text-[#ff5a0a]">
-                          {index + 1}
-                        </span>
-                        {location.name || (location.is_primary ? 'Hauptadresse' : 'Serviceadresse')}
+                  {detail.service_locations
+                    .slice(0, 2)
+                    .map((location, index) => (
+                      <div key={location.id} className="p-4 text-sm">
+                        <div className="mb-2 flex items-center gap-2 font-semibold">
+                          <span className="flex size-5 items-center justify-center rounded-full bg-orange-100 text-xs text-[#ff5a0a]">
+                            {index + 1}
+                          </span>
+                          {location.name ||
+                            (location.is_primary
+                              ? 'Hauptadresse'
+                              : 'Serviceadresse')}
+                        </div>
+                        <div>
+                          {[location.street, location.house_number]
+                            .filter(Boolean)
+                            .join(' ')}
+                        </div>
+                        <div>
+                          {[location.postal_code, location.city]
+                            .filter(Boolean)
+                            .join(' ')}
+                        </div>
+                        {location.access_notes && (
+                          <div className="mt-3 text-xs text-slate-500">
+                            Zugang: {location.access_notes}
+                          </div>
+                        )}
                       </div>
-                      <div>{[location.street, location.house_number].filter(Boolean).join(' ')}</div>
-                      <div>{[location.postal_code, location.city].filter(Boolean).join(' ')}</div>
-                      {location.access_notes && (
-                        <div className="mt-3 text-xs text-slate-500">Zugang: {location.access_notes}</div>
-                      )}
-                    </div>
-                  ))}
+                    ))}
                 </div>
               </section>
 
               <section className="rounded-xl border bg-white">
-                <div className="border-b p-4 font-bold">Letzte Aufträge</div>
-                <table className="w-full text-sm">
-                  <thead className="bg-slate-50 text-left text-xs text-slate-500">
-                    <tr>
-                      <th className="px-4 py-3">Auftrag</th>
-                      <th className="px-4 py-3">Datum</th>
-                      <th className="px-4 py-3">Gerät / Problem</th>
-                      <th className="px-4 py-3">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {detail.service_orders.map((order) => (
-                      <tr key={order.id} className="border-t">
-                        <td className="px-4 py-3 font-semibold text-blue-600">
-                          {order.order_number}
-                        </td>
-                        <td className="px-4 py-3 text-slate-500">
-                          {new Date(order.created_at).toLocaleDateString('de-DE')}
-                        </td>
-                        <td className="max-w-64 px-4 py-3">
-                          <div className="font-medium">
-                            {order.asset?.model ||
-                              order.items.find(
-                                (item) => item.classification === 'device',
-                              )?.description ||
-                              `${order.items.length} Positionen`}
-                          </div>
-                          <div className="truncate text-xs text-slate-500">
-                            {order.source === 'legacy'
-                              ? 'Historischer Auftrag'
-                              : order.fault_description}
-                          </div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className="rounded bg-slate-100 px-2 py-1 text-xs">
-                            {orderStatus[order.status] || order.status}
-                          </span>
-                        </td>
+                <div className="border-b p-4 font-bold">
+                  Aufträge ({detail.service_orders.length})
+                </div>
+                <div className="max-h-[520px] overflow-auto">
+                  <table className="w-full text-sm">
+                    <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs text-slate-500">
+                      <tr>
+                        <th className="px-4 py-3">Auftrag</th>
+                        <th className="px-4 py-3">Datum</th>
+                        <th className="px-4 py-3">Inhalt</th>
+                        <th className="px-4 py-3 text-right">Gesamt brutto</th>
+                        <th className="px-4 py-3">Status</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {detail.service_orders.map((order) => (
+                        <tr
+                          key={order.id}
+                          onClick={() =>
+                            router.push(
+                              `/office/orders?order=${order.id}&open=1`,
+                            )
+                          }
+                          className="cursor-pointer border-t hover:bg-orange-50/70"
+                        >
+                          <td className="px-4 py-3 font-semibold text-blue-600">
+                            {order.order_number}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-slate-500">
+                            {serviceOrderDate(order).toLocaleDateString(
+                              'de-DE',
+                            )}
+                          </td>
+                          <td className="max-w-72 px-4 py-3">
+                            <div className="line-clamp-2 font-medium">
+                              {serviceOrderSummary(order)}
+                            </div>
+                            <div className="text-xs text-slate-500">
+                              {order.items.length} Positionen
+                            </div>
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-right font-semibold tabular-nums">
+                            {formatMoney(order.gross_total)}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="rounded bg-slate-100 px-2 py-1 text-xs">
+                              {orderStatus[order.status] || order.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
                 {detail.service_orders.length === 0 && (
-                  <div className="p-8 text-center text-sm text-slate-500">Noch keine Aufträge.</div>
+                  <div className="p-8 text-center text-sm text-slate-500">
+                    Noch keine Aufträge.
+                  </div>
                 )}
               </section>
             </>
@@ -625,7 +745,9 @@ export default function CustomersPage() {
             className="scroll-mt-24 rounded-xl border bg-white"
           >
             <div className="flex items-center justify-between border-b p-4">
-              <h3 className="font-bold">Geräte beim Kunden ({detail?.assets.length ?? 0})</h3>
+              <h3 className="font-bold">
+                Geräte beim Kunden ({detail?.assets.length ?? 0})
+              </h3>
               <button
                 onClick={() => openAssetEditor()}
                 className="text-sm font-semibold text-blue-600"
@@ -633,39 +755,94 @@ export default function CustomersPage() {
                 + Gerät
               </button>
             </div>
-            {detail?.assets.map((asset) => (
-              <button
-                key={asset.id}
-                onClick={() => openAssetEditor(asset)}
-                className="flex w-full items-center gap-3 border-b p-4 text-left hover:bg-slate-50"
-              >
-                <div className="flex size-12 shrink-0 items-center justify-center rounded-lg bg-slate-100">
-                  <PackageOpen className="size-6 text-slate-500" />
-                </div>
-                <div className="min-w-0 flex-1 text-sm">
-                  <div className="font-semibold">
-                    {[asset.manufacturer?.name, asset.model].filter(Boolean).join(' ') || 'Gerät'}
+            <div className="max-h-[620px] overflow-y-auto">
+              {assetGroups.map((group) => {
+                const expanded = expandedAssetGroup === group.key;
+
+                return (
+                  <div key={group.key} className="border-b">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExpandedAssetGroup(expanded ? '' : group.key)
+                      }
+                      className="flex w-full items-center gap-3 p-4 text-left hover:bg-slate-50"
+                    >
+                      <div className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-slate-100">
+                        <PackageOpen className="size-6 text-slate-500" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-semibold">
+                          {group.label}
+                        </div>
+                        <div className="text-xs text-slate-500">
+                          {
+                            group.assets.filter(
+                              (asset) => asset.status === 'active',
+                            ).length
+                          }{' '}
+                          aktiv
+                        </div>
+                      </div>
+                      <span className="rounded-full bg-[#ff5a0a] px-2.5 py-1 text-xs font-bold text-white">
+                        × {group.assets.length}
+                      </span>
+                      <ChevronRight
+                        className={`size-4 text-slate-400 transition-transform ${
+                          expanded ? 'rotate-90' : ''
+                        }`}
+                      />
+                    </button>
+                    {expanded && (
+                      <div className="border-t bg-slate-50/70">
+                        {group.assets.map((asset, index) => (
+                          <button
+                            type="button"
+                            key={asset.id}
+                            onClick={() => openAssetEditor(asset)}
+                            className="flex w-full items-center gap-3 border-b border-slate-200 px-4 py-3 text-left last:border-b-0 hover:bg-white"
+                          >
+                            <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-white text-xs font-semibold text-slate-500">
+                              {index + 1}
+                            </span>
+                            <div className="min-w-0 flex-1 text-xs">
+                              <div className="font-semibold">
+                                SN: {asset.serial_number || '—'} · FD:{' '}
+                                {asset.production_number || '—'}
+                              </div>
+                              <div className="mt-0.5 text-slate-500">
+                                {asset.purchase_date
+                                  ? new Date(
+                                      asset.purchase_date,
+                                    ).toLocaleDateString('de-DE')
+                                  : 'Datum unbekannt'}
+                                {asset.source_order_item?.service_order
+                                  ? ` · Auftrag ${asset.source_order_item.service_order.order_number}`
+                                  : ''}
+                              </div>
+                            </div>
+                            <span
+                              className={`rounded px-2 py-1 text-[11px] ${
+                                asset.status === 'active'
+                                  ? 'bg-emerald-100 text-emerald-700'
+                                  : 'bg-slate-200 text-slate-600'
+                              }`}
+                            >
+                              {asset.status === 'active' ? 'Aktiv' : 'Inaktiv'}
+                            </span>
+                            <ChevronRight className="size-4 text-slate-400" />
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  <div className="text-xs text-slate-500">SN: {asset.serial_number || '—'}</div>
-                  <div className="text-xs text-slate-500">FD: {asset.production_number || '—'}</div>
-                  {asset.source_order_item?.service_order && (
-                    <div className="text-xs text-blue-600">
-                      Auftrag {asset.source_order_item.service_order.order_number}
-                    </div>
-                  )}
-                </div>
-                <span className={`rounded px-2 py-1 text-xs ${
-                  asset.status === 'active'
-                    ? 'bg-emerald-100 text-emerald-700'
-                    : 'bg-slate-100 text-slate-600'
-                }`}>
-                  {asset.status === 'active' ? 'Aktiv' : 'Inaktiv'}
-                </span>
-                <ChevronRight className="size-4 text-slate-400" />
-              </button>
-            ))}
+                );
+              })}
+            </div>
             {!detail?.assets.length && (
-              <div className="p-8 text-center text-sm text-slate-500">Keine Geräte erfasst.</div>
+              <div className="p-8 text-center text-sm text-slate-500">
+                Keine Geräte erfasst.
+              </div>
             )}
           </section>
 
@@ -783,7 +960,10 @@ export default function CustomersPage() {
       )}
 
       {editor === 'location' && (
-        <EditorModal title="Serviceadresse hinzufügen" onClose={() => setEditor(null)}>
+        <EditorModal
+          title="Serviceadresse hinzufügen"
+          onClose={() => setEditor(null)}
+        >
           <form onSubmit={saveLocation}>
             <div className="grid grid-cols-2 gap-4 p-6">
               {[
@@ -915,7 +1095,10 @@ function EditorModal({
       <section className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
         <header className="flex items-center justify-between border-b px-6 py-4">
           <h2 className="text-lg font-bold">{title}</h2>
-          <button onClick={onClose} className="rounded-lg border px-3 py-2 text-sm">
+          <button
+            onClick={onClose}
+            className="rounded-lg border px-3 py-2 text-sm"
+          >
             Schließen
           </button>
         </header>

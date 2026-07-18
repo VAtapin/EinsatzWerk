@@ -77,11 +77,20 @@ class CustomerController extends Controller
                         'serviceLocation',
                         'items.assets:id,source_order_item_id,model,serial_number',
                     ])
-                    ->latest()
-                    ->limit(10),
+                    ->latest(),
                 'documents' => fn ($builder) => $builder->latest()->limit(25),
             ])
             ->findOrFail($customer);
+
+        $customer->serviceOrders->each(function ($order): void {
+            $order->setAttribute(
+                'gross_total',
+                round($order->items->sum(
+                    fn ($item) => (float) ($item->quantity ?? 1)
+                        * (float) ($item->gross_unit_price ?? 0),
+                ), 2),
+            );
+        });
 
         return response()->json(['data' => $customer]);
     }

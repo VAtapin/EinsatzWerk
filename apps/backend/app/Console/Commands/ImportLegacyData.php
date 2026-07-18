@@ -398,7 +398,7 @@ class ImportLegacyData extends Command
                 'source' => 'legacy',
                 'priority' => 'normal',
                 'status' => 'completed',
-                'fault_description' => 'Historischer Auftrag',
+                'fault_description' => '',
                 'dispatcher_notes' => 'Aus lsArtikel.txt übernommen.',
                 'preferred_date' => $lineDate,
                 'closed_at' => $timestamp,
