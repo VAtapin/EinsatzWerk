@@ -235,8 +235,10 @@ export default function OrdersPage() {
   const [cancelReason, setCancelReason] = useState('');
 
   const selected = useMemo(
-    () => orders.find((order) => order.id === selectedId) ?? orders[0],
-    [orders, selectedId],
+    () =>
+      orders.find((order) => order.id === selectedId) ??
+      (detail?.id === selectedId ? detail : orders[0]),
+    [detail, orders, selectedId],
   );
 
   const load = useCallback(async () => {
@@ -258,16 +260,13 @@ export default function OrdersPage() {
         typeof window !== 'undefined' &&
         new URLSearchParams(window.location.search).get('open') === '1';
       setSelectedId((current) =>
-        result.data.some((order) => order.id === requestedOrder)
+        requestedOrder
           ? (requestedOrder as string)
           : result.data.some((order) => order.id === current)
             ? current
             : (result.data[0]?.id ?? ''),
       );
-      if (
-        shouldOpen &&
-        result.data.some((order) => order.id === requestedOrder)
-      ) {
+      if (shouldOpen && requestedOrder) {
         setShowDetails(true);
       }
     } catch (error) {
