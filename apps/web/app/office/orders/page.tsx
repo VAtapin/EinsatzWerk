@@ -310,6 +310,25 @@ export default function OrdersPage() {
       );
   }, [selectedId]);
 
+  useEffect(() => {
+    if (!showDetails && !cancelOpen) return;
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+
+      if (cancelOpen) {
+        setCancelOpen(false);
+        setCancelReason('');
+        return;
+      }
+
+      setShowDetails(false);
+    };
+
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [cancelOpen, showDetails]);
+
   async function assign() {
     if (!selected || !technicianId) {
       toast.error('Bitte Auftrag und Techniker auswählen.');
