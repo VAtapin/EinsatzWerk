@@ -1,6 +1,12 @@
 'use client';
 
-import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type FormEvent,
+} from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -9,6 +15,7 @@ import {
   FileText,
   MapPin,
   MessageSquare,
+  Paperclip,
   Phone,
   Plus,
   Search,
@@ -18,7 +25,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { apiRequest, getAccessToken } from '@/lib/einsatzwerk-api';
+import { apiDownload, apiRequest, getAccessToken } from '@/lib/einsatzwerk-api';
 
 type VisitItem = {
   id: string;
@@ -82,7 +89,10 @@ function useTechnicianAccess() {
   return router;
 }
 
-function address(location: VisitItem['location'] | TechnicianCustomer['service_locations'][number]) {
+function address(
+  location:
+    VisitItem['location'] | TechnicianCustomer['service_locations'][number],
+) {
   return [
     location.street,
     location.house_number,
@@ -159,7 +169,9 @@ export function TechnicianOrdersPage() {
                   minute: '2-digit',
                 })}
               </div>
-              <div className="text-xs text-slate-500">{visit.order.order_number}</div>
+              <div className="text-xs text-slate-500">
+                {visit.order.order_number}
+              </div>
             </div>
             <div>
               <div className="font-bold">{visit.customer.name}</div>
@@ -168,7 +180,9 @@ export function TechnicianOrdersPage() {
               </div>
             </div>
             <div>
-              <div className="font-medium">{visit.asset?.model || 'Ohne Gerät'}</div>
+              <div className="font-medium">
+                {visit.asset?.model || 'Ohne Gerät'}
+              </div>
               <div className="mt-1 line-clamp-2 text-sm text-slate-500">
                 {visit.order.fault_description}
               </div>
@@ -203,7 +217,8 @@ export function TechnicianCustomersPage() {
   }, [query]);
   useEffect(() => {
     const timer = window.setTimeout(
-      () => load().catch(() => toast.error('Kunden konnten nicht geladen werden.')),
+      () =>
+        load().catch(() => toast.error('Kunden konnten nicht geladen werden.')),
       250,
     );
     return () => window.clearTimeout(timer);
@@ -229,7 +244,10 @@ export function TechnicianCustomersPage() {
             customer.service_locations.find((item) => item.is_primary) ??
             customer.service_locations[0];
           return (
-            <section key={customer.id} className="rounded-xl border bg-white p-5">
+            <section
+              key={customer.id}
+              className="rounded-xl border bg-white p-5"
+            >
               <div className="flex items-start justify-between">
                 <div>
                   <h2 className="text-lg font-bold">
@@ -294,7 +312,9 @@ export function TechnicianNewVisitPage() {
     apiRequest<{ data: TechnicianCustomer[] }>('/technician/customers')
       .then((result) => {
         setCustomers(result.data);
-        const requested = new URLSearchParams(window.location.search).get('customer');
+        const requested = new URLSearchParams(window.location.search).get(
+          'customer',
+        );
         setCustomerId(
           result.data.some((customer) => customer.id === requested)
             ? (requested as string)
@@ -356,7 +376,9 @@ export function TechnicianNewVisitPage() {
               {customers.map((customer) => (
                 <option key={customer.id} value={customer.id}>
                   {customer.company_name ||
-                    [customer.first_name, customer.last_name].filter(Boolean).join(' ')}
+                    [customer.first_name, customer.last_name]
+                      .filter(Boolean)
+                      .join(' ')}
                 </option>
               ))}
             </select>
@@ -452,36 +474,112 @@ type TechnicianMessage = {
   id: string;
   subject: string;
   body: string;
+  severity: 'normal' | 'high' | 'urgent';
+  requires_ack: boolean;
+  read_at: string | null;
+  acknowledged_at: string | null;
   created_at: string;
-  sender: { name: string };
-  recipient: { name: string } | null;
+  sender: { id: string; name: string };
+  recipient: { id: string; name: string } | null;
+  service_order: { id: string; order_number: string } | null;
+  visit: { id: string } | null;
+  metadata: {
+    event?: string;
+    previous?: { planned_start_at?: string | null };
+    current?: { planned_start_at?: string | null };
+  } | null;
+  attachments: Array<{
+    id: string;
+    original_name: string;
+    size: number;
+  }>;
 };
 
 export function TechnicianMessagesPage() {
   useTechnicianAccess();
   const [items, setItems] = useState<TechnicianMessage[]>([]);
+  const [currentUserId, setCurrentUserId] = useState('');
   const [form, setForm] = useState({ subject: '', body: '' });
+  const [attachment, setAttachment] = useState<File | null>(null);
   const load = useCallback(async () => {
-    const result =
-      await apiRequest<{ data: TechnicianMessage[] }>('/technician/messages');
+    const result = await apiRequest<{ data: TechnicianMessage[] }>(
+      '/technician/messages',
+    );
     setItems(result.data);
   }, []);
   useEffect(() => {
-    load().catch(() => toast.error('Nachrichten konnten nicht geladen werden.'));
+    load().catch(() =>
+      toast.error('Nachrichten konnten nicht geladen werden.'),
+    );
+    apiRequest<{ user: { id: string } }>('/auth/me')
+      .then((result) => setCurrentUserId(result.user.id))
+      .catch(() => null);
+    const timer = window.setInterval(() => void load(), 3000);
+    return () => window.clearInterval(timer);
   }, [load]);
   async function send(event: FormEvent) {
     event.preventDefault();
     try {
-      await apiRequest('/technician/messages', {
-        method: 'POST',
-        body: JSON.stringify({ ...form, recipient_id: null }),
-      });
+      const result = await apiRequest<{ data: { id: string } }>(
+        '/technician/messages',
+        {
+          method: 'POST',
+          body: JSON.stringify({ ...form, recipient_id: null }),
+        },
+      );
+      if (attachment) {
+        const upload = new FormData();
+        upload.append('file', attachment);
+        await apiRequest(`/technician/messages/${result.data.id}/attachments`, {
+          method: 'POST',
+          body: upload,
+        });
+      }
       setForm({ subject: '', body: '' });
+      setAttachment(null);
       await load();
       toast.success('Nachricht wurde gesendet.');
     } catch {
       toast.error('Nachricht konnte nicht gesendet werden.');
     }
+  }
+  async function quickReply(message: TechnicianMessage, body: string) {
+    try {
+      await apiRequest('/technician/messages', {
+        method: 'POST',
+        body: JSON.stringify({
+          recipient_id:
+            message.sender.id === currentUserId ? null : message.sender.id,
+          service_order_id: message.service_order?.id ?? null,
+          subject: `Re: ${message.subject}`,
+          body,
+          severity: body === 'Rückfrage' ? 'high' : 'normal',
+        }),
+      });
+      toast.success('Antwort wurde gesendet.');
+      await load();
+    } catch {
+      toast.error('Antwort konnte nicht gesendet werden.');
+    }
+  }
+  async function markRead(message: TechnicianMessage) {
+    if (
+      message.sender.id === currentUserId ||
+      message.read_at ||
+      !message.recipient
+    )
+      return;
+    await apiRequest(`/technician/messages/${message.id}/read`, {
+      method: 'PATCH',
+    }).catch(() => null);
+    await load();
+  }
+  async function acknowledge(message: TechnicianMessage) {
+    await apiRequest(`/technician/messages/${message.id}/acknowledge`, {
+      method: 'POST',
+    });
+    toast.success('Änderung wurde bestätigt.');
+    await load();
   }
   return (
     <div className="mx-auto grid max-w-6xl gap-4 p-4 md:grid-cols-[1fr_380px] md:p-6">
@@ -491,17 +589,119 @@ export function TechnicianMessagesPage() {
         </header>
         <div className="divide-y">
           {items.map((message) => (
-            <article key={message.id} className="p-5">
+            <article
+              key={message.id}
+              onClick={() => void markRead(message)}
+              className={`p-5 ${
+                !message.read_at &&
+                message.sender.id !== currentUserId &&
+                message.recipient
+                  ? 'bg-orange-50/60'
+                  : ''
+              }`}
+            >
               <div className="flex justify-between">
-                <strong>{message.subject}</strong>
+                <div className="flex items-center gap-2">
+                  <strong>{message.subject}</strong>
+                  {message.requires_ack && !message.acknowledged_at && (
+                    <span className="rounded bg-orange-100 px-2 py-0.5 text-[10px] font-bold text-orange-700">
+                      Bestätigung erforderlich
+                    </span>
+                  )}
+                </div>
                 <span className="text-xs text-slate-500">
                   {new Date(message.created_at).toLocaleString('de-DE')}
                 </span>
               </div>
               <div className="mt-1 text-xs text-slate-500">
                 {message.sender.name}
+                {message.service_order &&
+                  ` · ${message.service_order.order_number}`}
               </div>
               <p className="mt-3 whitespace-pre-wrap text-sm">{message.body}</p>
+              {message.metadata?.previous?.planned_start_at &&
+                message.metadata?.current?.planned_start_at && (
+                  <div className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-3 rounded-lg bg-slate-50 p-3 text-xs">
+                    <span>
+                      Bisher:{' '}
+                      <strong>
+                        {new Date(
+                          message.metadata.previous.planned_start_at,
+                        ).toLocaleString('de-DE')}
+                      </strong>
+                    </span>
+                    <span>→</span>
+                    <span>
+                      Neu:{' '}
+                      <strong className="text-[#ff5a0a]">
+                        {new Date(
+                          message.metadata.current.planned_start_at,
+                        ).toLocaleString('de-DE')}
+                      </strong>
+                    </span>
+                  </div>
+                )}
+              {message.requires_ack &&
+                !message.acknowledged_at &&
+                message.recipient?.id === currentUserId && (
+                  <button
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void acknowledge(message);
+                    }}
+                    className="mt-4 h-10 rounded-lg bg-[#ff5a0a] px-4 text-sm font-semibold text-white"
+                  >
+                    Änderung übernehmen
+                  </button>
+                )}
+              {message.sender.id !== currentUserId && (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {[
+                    'Übernommen',
+                    'Bin unterwegs',
+                    'Rückfrage',
+                    'Teil fehlt',
+                  ].map((reply) => (
+                    <button
+                      key={reply}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void quickReply(message, reply);
+                      }}
+                      className="rounded-lg border px-3 py-2 text-xs font-semibold"
+                    >
+                      {reply}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {message.visit && (
+                <button
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    window.location.href = `/technician/visits/${message.visit?.id}`;
+                  }}
+                  className="mt-3 text-xs font-semibold text-blue-600"
+                >
+                  Einsatz öffnen
+                </button>
+              )}
+              {message.attachments?.map((attachment) => (
+                <button
+                  key={attachment.id}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void apiDownload(
+                      `/technician/messages/${message.id}/attachments/${attachment.id}`,
+                      attachment.original_name,
+                    );
+                  }}
+                  className="mt-3 mr-2 inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold"
+                >
+                  <Paperclip className="size-3.5" />
+                  {attachment.original_name}
+                </button>
+              ))}
             </article>
           ))}
           {!items.length && (
@@ -512,13 +712,18 @@ export function TechnicianMessagesPage() {
         </div>
       </section>
       <form onSubmit={send} className="h-fit rounded-xl border bg-white">
-        <header className="border-b p-5 font-bold">Nachricht an Disposition</header>
+        <header className="border-b p-5 font-bold">
+          Nachricht an Disposition
+        </header>
         <div className="space-y-4 p-5">
           <input
             required
             value={form.subject}
             onChange={(event) =>
-              setForm((current) => ({ ...current, subject: event.target.value }))
+              setForm((current) => ({
+                ...current,
+                subject: event.target.value,
+              }))
             }
             className="h-11 w-full rounded-lg border px-3"
             placeholder="Betreff"
@@ -532,6 +737,17 @@ export function TechnicianMessagesPage() {
             className="min-h-36 w-full rounded-lg border p-3"
             placeholder="Nachricht…"
           />
+          <label className="block text-sm font-medium">
+            Foto oder Dokument
+            <input
+              type="file"
+              accept=".jpg,.jpeg,.png,.webp,.pdf,.doc,.docx,.xls,.xlsx,.txt"
+              onChange={(event) =>
+                setAttachment(event.target.files?.[0] ?? null)
+              }
+              className="mt-1 block w-full rounded-lg border p-2 text-sm"
+            />
+          </label>
           <button className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#ff5a0a] font-semibold text-white">
             <Send className="size-4" /> Senden
           </button>
@@ -558,7 +774,12 @@ export function TechnicianSettingsPage() {
     password: '',
   });
   const [saving, setSaving] = useState(false);
+  const [notificationPermission, setNotificationPermission] =
+    useState<NotificationPermission>('default');
   useEffect(() => {
+    if ('Notification' in window) {
+      setNotificationPermission(Notification.permission);
+    }
     apiRequest<{ user: Profile }>('/auth/me')
       .then((result) =>
         setForm({
@@ -590,6 +811,20 @@ export function TechnicianSettingsPage() {
       toast.error('Profil konnte nicht gespeichert werden.');
     } finally {
       setSaving(false);
+    }
+  }
+  async function enableNotifications() {
+    if (!('Notification' in window)) {
+      toast.error('Dieser Browser unterstützt keine Systembenachrichtigungen.');
+      return;
+    }
+    const permission = await Notification.requestPermission();
+    setNotificationPermission(permission);
+    if (permission === 'granted') {
+      toast.success('Einsatzmeldungen sind aktiviert.');
+      new Notification('EinsatzWerk', {
+        body: 'Benachrichtigungen sind jetzt aktiv.',
+      });
     }
   }
   return (
@@ -624,7 +859,10 @@ export function TechnicianSettingsPage() {
             <input
               value={form.phone}
               onChange={(event) =>
-                setForm((current) => ({ ...current, phone: event.target.value }))
+                setForm((current) => ({
+                  ...current,
+                  phone: event.target.value,
+                }))
               }
               className="mt-1 h-11 w-full rounded-lg border px-3"
             />
@@ -634,7 +872,10 @@ export function TechnicianSettingsPage() {
             <select
               value={form.locale}
               onChange={(event) =>
-                setForm((current) => ({ ...current, locale: event.target.value }))
+                setForm((current) => ({
+                  ...current,
+                  locale: event.target.value,
+                }))
               }
               className="mt-1 h-11 w-full rounded-lg border bg-white px-3"
             >
@@ -649,7 +890,10 @@ export function TechnicianSettingsPage() {
               minLength={12}
               value={form.password}
               onChange={(event) =>
-                setForm((current) => ({ ...current, password: event.target.value }))
+                setForm((current) => ({
+                  ...current,
+                  password: event.target.value,
+                }))
               }
               className="mt-1 h-11 w-full rounded-lg border px-3"
               placeholder="Leer lassen, um es nicht zu ändern"
@@ -665,6 +909,28 @@ export function TechnicianSettingsPage() {
           </button>
         </footer>
       </form>
+      <section className="mt-4 rounded-xl border bg-white p-5">
+        <div className="flex items-center justify-between gap-5">
+          <div>
+            <div className="font-bold">Einsatzmeldungen</div>
+            <div className="mt-1 text-sm text-slate-500">
+              Ton, Vibration und Systemmeldung bei Änderungen der Tour.
+            </div>
+          </div>
+          <button
+            type="button"
+            disabled={notificationPermission === 'granted'}
+            onClick={() => void enableNotifications()}
+            className="h-11 rounded-lg bg-[#061b31] px-5 text-sm font-semibold text-white disabled:bg-emerald-600"
+          >
+            {notificationPermission === 'granted'
+              ? 'Aktiviert'
+              : notificationPermission === 'denied'
+                ? 'Im Browser blockiert'
+                : 'Aktivieren'}
+          </button>
+        </div>
+      </section>
     </div>
   );
 }

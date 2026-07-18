@@ -60,6 +60,9 @@ Route::prefix('v1')->group(function (): void {
             Route::get('messages', [MessageController::class, 'index']);
             Route::post('messages', [MessageController::class, 'store']);
             Route::patch('messages/{message}/read', [MessageController::class, 'read']);
+            Route::post('messages/{message}/acknowledge', [MessageController::class, 'acknowledge']);
+            Route::post('messages/{message}/attachments', [MessageController::class, 'attach']);
+            Route::get('messages/{message}/attachments/{attachment}', [MessageController::class, 'attachment']);
             Route::get('customers/search', CustomerSearchController::class);
             Route::get('customers', [CustomerController::class, 'index']);
             Route::post('customers', [CustomerController::class, 'store']);
@@ -75,6 +78,7 @@ Route::prefix('v1')->group(function (): void {
             Route::post('service-orders', [ServiceOrderController::class, 'store']);
             Route::get('service-orders/{serviceOrder}', [ServiceOrderController::class, 'show']);
             Route::post('service-orders/{serviceOrder}/assign', [ServiceOrderController::class, 'assign']);
+            Route::post('service-orders/{serviceOrder}/cancel', [ServiceOrderController::class, 'cancel']);
             Route::get('technicians', [ServiceOrderController::class, 'technicians']);
             Route::get('dispatch/board', [DispatchController::class, 'board']);
             Route::patch('dispatch/visits/{visit}', [DispatchController::class, 'reschedule']);
@@ -96,6 +100,9 @@ Route::prefix('v1')->group(function (): void {
                 Route::get('messages', [MessageController::class, 'index']);
                 Route::post('messages', [MessageController::class, 'store']);
                 Route::patch('messages/{message}/read', [MessageController::class, 'read']);
+                Route::post('messages/{message}/acknowledge', [MessageController::class, 'acknowledge']);
+                Route::post('messages/{message}/attachments', [MessageController::class, 'attach']);
+                Route::get('messages/{message}/attachments/{attachment}', [MessageController::class, 'attachment']);
                 Route::get('visits/{visit}', [TechnicianVisitController::class, 'show']);
                 Route::post('visits/{visit}/start', [TechnicianVisitController::class, 'start']);
                 Route::post('visits/{visit}/parts', [TechnicianVisitController::class, 'requestPart']);

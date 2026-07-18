@@ -11,6 +11,7 @@ use App\Models\ServiceOrder;
 use App\Models\StatusHistory;
 use App\Models\Visit;
 use App\Models\VisitDocument;
+use App\Services\OperationalMessageService;
 use App\Services\ServiceReportGenerator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
@@ -83,8 +84,11 @@ class TechnicianVisitController extends Controller
         return response()->json(['data' => $this->payload($visit->refresh())]);
     }
 
-    public function requestPart(Request $request, string $visit): JsonResponse
-    {
+    public function requestPart(
+        Request $request,
+        string $visit,
+        OperationalMessageService $messages,
+    ): JsonResponse {
         $visit = $this->findFor($request, $visit);
         abort_unless($visit->status === 'in_progress', 409);
 
@@ -105,6 +109,23 @@ class TechnicianVisitController extends Controller
             'status' => 'requested',
             'requested_by' => $request->user()->id,
         ]);
+        $visit->load(['serviceOrder.customer']);
+        $messages->notifyOffice(
+            $request->user(),
+            'Teil dringend prüfen',
+            implode("\n", [
+                $visit->serviceOrder->order_number.' · '.$validated['description'],
+                'Menge: '.$validated['quantity'],
+                'Techniker: '.$request->user()->name,
+            ]),
+            $visit->serviceOrder,
+            $visit,
+            'high',
+            [
+                'event' => 'part_requested',
+                'part_requirement_id' => $part->id,
+            ],
+        );
 
         return response()->json(['data' => $part], 201);
     }
@@ -131,8 +152,11 @@ class TechnicianVisitController extends Controller
         return response()->json(['data' => $part], 201);
     }
 
-    public function uploadPhoto(Request $request, string $visit): JsonResponse
-    {
+    public function uploadPhoto(
+        Request $request,
+        string $visit,
+        OperationalMessageService $messages,
+    ): JsonResponse {
         $visit = $this->findFor($request, $visit);
         abort_unless($visit->status === 'in_progress', 409);
         $validated = $request->validate([
@@ -153,12 +177,25 @@ class TechnicianVisitController extends Controller
             'size' => $file->getSize(),
             'created_by' => $request->user()->id,
         ]);
+        $visit->load('serviceOrder');
+        $messages->notifyOffice(
+            $request->user(),
+            'Neues Einsatzfoto',
+            $visit->serviceOrder->order_number.' · '.$file->getClientOriginalName(),
+            $visit->serviceOrder,
+            $visit,
+            'normal',
+            ['event' => 'visit_photo_uploaded', 'document_id' => $document->id],
+        );
 
         return response()->json(['data' => $document], 201);
     }
 
-    public function signature(Request $request, string $visit): JsonResponse
-    {
+    public function signature(
+        Request $request,
+        string $visit,
+        OperationalMessageService $messages,
+    ): JsonResponse {
         $visit = $this->findFor($request, $visit);
         abort_unless($visit->status === 'in_progress', 409);
         $validated = $request->validate([
@@ -185,6 +222,16 @@ class TechnicianVisitController extends Controller
                 ],
             ],
         );
+        $visit->load('serviceOrder');
+        $messages->notifyOffice(
+            $request->user(),
+            'Kundenunterschrift erfasst',
+            $visit->serviceOrder->order_number.' · '.$validated['signer_name'],
+            $visit->serviceOrder,
+            $visit,
+            'normal',
+            ['event' => 'visit_signature_added', 'document_id' => $document->id],
+        );
 
         return response()->json(['data' => $document], 201);
     }
@@ -193,6 +240,7 @@ class TechnicianVisitController extends Controller
         Request $request,
         string $visit,
         ServiceReportGenerator $reportGenerator,
+        OperationalMessageService $messages,
     ): JsonResponse {
         $visit = $this->findFor($request, $visit);
         abort_unless($visit->status === 'in_progress', 409);
@@ -233,6 +281,31 @@ class TechnicianVisitController extends Controller
         if ($visit->refresh()->status === 'completed') {
             $reportGenerator->generate($visit);
         }
+        $visit->load(['serviceOrder.customer']);
+        $messages->notifyOffice(
+            $request->user(),
+            $visit->status === 'completed'
+                ? 'Einsatz abgeschlossen'
+                : 'Folgeeinsatz erforderlich',
+            implode("\n", array_filter([
+                $visit->serviceOrder->order_number.' · '.
+                    ($visit->serviceOrder->customer?->company_name ?: trim(
+                        ($visit->serviceOrder->customer?->first_name ?? '').' '.
+                        ($visit->serviceOrder->customer?->last_name ?? ''),
+                    )),
+                $validated['work_performed'],
+                $validated['technician_notes'] ?? null,
+            ])),
+            $visit->serviceOrder,
+            $visit,
+            $visit->status === 'completed' ? 'normal' : 'high',
+            [
+                'event' => $visit->status === 'completed'
+                    ? 'visit_completed'
+                    : 'follow_up_required',
+                'result' => $validated['result'],
+            ],
+        );
 
         return response()->json(['data' => $this->payload($visit->refresh())]);
     }

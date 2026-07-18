@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
+  Ban,
   CalendarDays,
   Check,
   ChevronRight,
@@ -13,6 +14,7 @@ import {
   Search,
   UserRound,
   Wrench,
+  X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiRequest, getAccessToken } from '@/lib/einsatzwerk-api';
@@ -74,6 +76,7 @@ const statuses = [
   ['in_progress', 'In Arbeit'],
   ['awaiting_parts', 'Warten auf Teile'],
   ['completed', 'Abgeschlossen'],
+  ['cancelled', 'Storniert'],
 ] as const;
 
 const statusStyle: Record<string, string> = {
@@ -153,6 +156,8 @@ export default function OrdersPage() {
   const [duration, setDuration] = useState(60);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
 
   const selected = useMemo(
     () => orders.find((order) => order.id === selectedId) ?? orders[0],
@@ -179,8 +184,8 @@ export default function OrdersPage() {
         )
           ? (new URLSearchParams(window.location.search).get('order') as string)
           : result.data.some((order) => order.id === current)
-          ? current
-          : (result.data[0]?.id ?? ''),
+            ? current
+            : (result.data[0]?.id ?? ''),
       );
     } catch (error) {
       const statusCode = (error as Error & { status?: number }).status;
@@ -217,7 +222,9 @@ export default function OrdersPage() {
     }
     apiRequest<{ data: OrderDetail }>(`/service-orders/${selectedId}`)
       .then((result) => setDetail(result.data))
-      .catch(() => toast.error('Auftragsdetails konnten nicht geladen werden.'));
+      .catch(() =>
+        toast.error('Auftragsdetails konnten nicht geladen werden.'),
+      );
   }, [selectedId]);
 
   async function assign() {
@@ -243,6 +250,25 @@ export default function OrdersPage() {
       await load();
     } catch {
       toast.error('Zuweisung konnte nicht gespeichert werden.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function cancelOrder() {
+    if (!selected || !cancelReason.trim()) return;
+    setSaving(true);
+    try {
+      await apiRequest(`/service-orders/${selected.id}/cancel`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: cancelReason.trim() }),
+      });
+      toast.success('Auftrag wurde storniert und der Techniker informiert.');
+      setCancelOpen(false);
+      setCancelReason('');
+      await load();
+    } catch {
+      toast.error('Auftrag konnte nicht storniert werden.');
     } finally {
       setSaving(false);
     }
@@ -478,11 +504,21 @@ export default function OrdersPage() {
                   <Check className="size-5" />
                   {saving ? 'Speichern…' : 'Techniker zuweisen'}
                 </button>
+                {!['completed', 'cancelled'].includes(selected.status) && (
+                  <button
+                    onClick={() => setCancelOpen(true)}
+                    className="flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-red-200 font-semibold text-red-600 hover:bg-red-50"
+                  >
+                    <Ban className="size-4" /> Auftrag stornieren
+                  </button>
+                )}
               </div>
               <div className="grid grid-cols-2 border-t text-sm">
                 <button
                   onClick={() =>
-                    router.push(`/office/customers?customer=${selected.customer.id}`)
+                    router.push(
+                      `/office/customers?customer=${selected.customer.id}`,
+                    )
                   }
                   className="flex items-center justify-center gap-2 border-r p-4"
                 >
@@ -504,6 +540,52 @@ export default function OrdersPage() {
           )}
         </aside>
       </div>
+
+      {cancelOpen && selected && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-[#061b31]/60 p-6 backdrop-blur-sm">
+          <section className="w-full max-w-lg rounded-2xl bg-white shadow-2xl">
+            <header className="flex items-start justify-between border-b p-5">
+              <div>
+                <h2 className="text-lg font-bold">Auftrag stornieren</h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  {selected.order_number} · {customerName(selected)}
+                </p>
+              </div>
+              <button onClick={() => setCancelOpen(false)}>
+                <X className="size-5 text-slate-400" />
+              </button>
+            </header>
+            <div className="p-5">
+              <label className="text-sm font-medium">
+                Grund der Stornierung
+                <textarea
+                  autoFocus
+                  required
+                  value={cancelReason}
+                  onChange={(event) => setCancelReason(event.target.value)}
+                  className="mt-2 min-h-32 w-full rounded-lg border p-3"
+                  placeholder="z. B. Kunde hat Termin abgesagt…"
+                />
+              </label>
+            </div>
+            <footer className="flex justify-end gap-3 border-t p-5">
+              <button
+                onClick={() => setCancelOpen(false)}
+                className="h-11 rounded-lg border px-5"
+              >
+                Abbrechen
+              </button>
+              <button
+                disabled={saving || !cancelReason.trim()}
+                onClick={() => void cancelOrder()}
+                className="h-11 rounded-lg bg-red-600 px-5 font-semibold text-white disabled:opacity-50"
+              >
+                Verbindlich stornieren
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
 
       <div className="mt-4 grid grid-cols-4 gap-3">
         {[
@@ -547,7 +629,9 @@ export default function OrdersPage() {
                 <div className="text-xs font-semibold text-slate-500 uppercase">
                   Auftrag {detail.order_number}
                 </div>
-                <h2 className="mt-2 text-2xl font-bold">{customerName(detail)}</h2>
+                <h2 className="mt-2 text-2xl font-bold">
+                  {customerName(detail)}
+                </h2>
               </div>
               <button
                 onClick={() => setShowDetails(false)}

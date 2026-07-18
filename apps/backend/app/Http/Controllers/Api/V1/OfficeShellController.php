@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Models\Asset;
 use App\Models\Customer;
+use App\Models\Message;
 use App\Models\PartRequirement;
 use App\Models\ServiceOrder;
 use Illuminate\Http\JsonResponse;
@@ -165,8 +166,34 @@ class OfficeShellController extends Controller
                 'href' => '/office/planning?order='.$order->id,
                 'created_at' => $order->created_at,
             ]);
+        $messages = Message::query()
+            ->where('organization_id', $organizationId)
+            ->where('recipient_id', $request->user()->id)
+            ->where('sender_id', '!=', $request->user()->id)
+            ->whereNull('read_at')
+            ->with(['sender:id,name', 'serviceOrder:id,order_number'])
+            ->latest()
+            ->limit(15)
+            ->get()
+            ->map(fn (Message $message) => [
+                'id' => 'message-'.$message->id,
+                'message_id' => $message->id,
+                'type' => 'message',
+                'severity' => $message->severity,
+                'title' => $message->subject,
+                'body' => implode(' · ', array_filter([
+                    $message->sender?->name,
+                    $message->serviceOrder?->order_number,
+                    $message->body,
+                ])),
+                'href' => $message->service_order_id
+                    ? '/office/orders?order='.$message->service_order_id
+                    : '/office/messages',
+                'created_at' => $message->created_at,
+            ]);
         $notifications = $partRequirements
             ->concat($orders)
+            ->concat($messages)
             ->sortByDesc('created_at')
             ->take(12)
             ->values();

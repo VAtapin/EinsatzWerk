@@ -8,6 +8,7 @@ use App\Models\ServiceOrder;
 use App\Models\User;
 use App\Models\Visit;
 use App\Services\MapProviderService;
+use App\Services\OperationalMessageService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -47,8 +48,11 @@ class DispatchController extends Controller
         ]);
     }
 
-    public function reschedule(Request $request, string $visit): JsonResponse
-    {
+    public function reschedule(
+        Request $request,
+        string $visit,
+        OperationalMessageService $messages,
+    ): JsonResponse {
         $organizationId = $request->user()->organization_id;
         $visitModel = Visit::query()
             ->where('organization_id', $organizationId)
@@ -71,6 +75,12 @@ class DispatchController extends Controller
             409,
             'Der Einsatz wurde zwischenzeitlich geändert.',
         );
+        $previous = [
+            'technician_id' => $visitModel->technician_id,
+            'planned_start_at' => $visitModel->planned_start_at?->toISOString(),
+            'planned_end_at' => $visitModel->planned_end_at?->toISOString(),
+        ];
+        $previousTechnician = $visitModel->technician;
         $this->ensureNoConflict(
             $organizationId,
             $validated['technician_id'],
@@ -85,18 +95,63 @@ class DispatchController extends Controller
             'planned_end_at' => $validated['planned_end_at'],
             'lock_version' => $visitModel->lock_version + 1,
         ]);
+        $visitModel->load([
+            'serviceOrder.customer',
+            'serviceOrder.serviceLocation',
+            'technician',
+        ]);
+        if ($previousTechnician && $previousTechnician->isNot($visitModel->technician)) {
+            $messages->send(
+                $request->user(),
+                $previousTechnician,
+                'Einsatz wurde neu zugewiesen',
+                $visitModel->serviceOrder->order_number.
+                    ' ist nicht mehr Teil Ihrer Tour.',
+                $visitModel->serviceOrder,
+                $visitModel,
+                'high',
+                false,
+                ['event' => 'visit_reassigned', 'previous' => $previous],
+            );
+        }
+        $messages->send(
+            $request->user(),
+            $visitModel->technician,
+            'Einsatzplan geändert',
+            implode("\n", [
+                $visitModel->serviceOrder->order_number.' · '.
+                    ($visitModel->serviceOrder->customer?->company_name ?: trim(
+                        ($visitModel->serviceOrder->customer?->first_name ?? '').' '.
+                        ($visitModel->serviceOrder->customer?->last_name ?? ''),
+                    )),
+                'Neuer Termin: '.$visitModel->planned_start_at?->format('d.m.Y H:i').
+                    '–'.$visitModel->planned_end_at?->format('H:i'),
+            ]),
+            $visitModel->serviceOrder,
+            $visitModel,
+            'urgent',
+            true,
+            [
+                'event' => 'visit_rescheduled',
+                'previous' => $previous,
+                'current' => [
+                    'technician_id' => $visitModel->technician_id,
+                    'planned_start_at' => $visitModel->planned_start_at?->toISOString(),
+                    'planned_end_at' => $visitModel->planned_end_at?->toISOString(),
+                ],
+            ],
+        );
 
         return response()->json([
-            'data' => $visitModel->refresh()->load([
-                'serviceOrder.customer',
-                'serviceOrder.serviceLocation',
-                'technician',
-            ]),
+            'data' => $visitModel,
         ]);
     }
 
-    public function buildRoute(Request $request, MapProviderService $maps): JsonResponse
-    {
+    public function buildRoute(
+        Request $request,
+        MapProviderService $maps,
+        OperationalMessageService $messages,
+    ): JsonResponse {
         $organizationId = $request->user()->organization_id;
         $validated = $request->validate([
             'date' => ['required', 'date'],
@@ -155,6 +210,28 @@ class DispatchController extends Controller
                 'longitude' => $point['longitude'],
             ]);
         }
+        $technician = User::query()->findOrFail($validated['technician_id']);
+        $messages->send(
+            $request->user(),
+            $technician,
+            'Tagesroute aktualisiert',
+            sprintf(
+                'Ihre Route am %s enthält %d Einsätze · %.1f km · ca. %d Min. Fahrzeit.',
+                CarbonImmutable::parse($validated['date'])->format('d.m.Y'),
+                $visits->count(),
+                $calculated['distance'] / 1000,
+                (int) round($calculated['duration'] / 60),
+            ),
+            $visits->first()->serviceOrder,
+            $visits->first(),
+            'high',
+            true,
+            [
+                'event' => 'route_updated',
+                'route_id' => $route->id,
+                'visit_ids' => $visits->pluck('id')->all(),
+            ],
+        );
 
         return response()->json(['data' => $this->routePayload($route->refresh())]);
     }

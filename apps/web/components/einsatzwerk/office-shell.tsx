@@ -78,7 +78,9 @@ type SearchResult = {
 
 type OfficeNotification = {
   id: string;
+  message_id?: string;
   type: string;
+  severity?: string;
   title: string;
   body: string;
   href: string;
@@ -175,6 +177,33 @@ function signalIncomingCall(call: TelephonyCall) {
   }
 }
 
+function signalOperationalNotification(notification: OfficeNotification) {
+  try {
+    const context = new AudioContext();
+    void context.resume().then(() => {
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.frequency.value = 700;
+      gain.gain.setValueAtTime(0.0001, context.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.14, context.currentTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(
+        0.0001,
+        context.currentTime + 0.35,
+      );
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.start();
+      oscillator.stop(context.currentTime + 0.36);
+      window.setTimeout(() => void context.close(), 600);
+    });
+  } catch {
+    // Browsers can block sound before the first interaction.
+  }
+  if ('Notification' in window && Notification.permission === 'granted') {
+    new Notification(notification.title, { body: notification.body });
+  }
+}
+
 export function OfficeShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -190,18 +219,49 @@ export function OfficeShell({ children }: { children: ReactNode }) {
   const [incomingCall, setIncomingCall] = useState<TelephonyCall | null>(null);
   const telephonyCursor = useRef<string | null>(null);
   const notifiedCalls = useRef(new Set<string>());
+  const knownNotificationIds = useRef(new Set<string>());
+  const notificationsInitialized = useRef(false);
 
   useEffect(() => {
     apiRequest<{ user: CurrentUser }>('/auth/me')
       .then((result) => setUser(result.user))
       .catch(() => router.replace('/login'));
-    apiRequest<{
-      data: OfficeNotification[];
-      meta: { count: number };
-    }>('/office/notifications')
-      .then((result) => setNotifications(result.data))
-      .catch(() => setNotifications([]));
   }, [router, pathname]);
+
+  useEffect(() => {
+    let mounted = true;
+    async function pollNotifications() {
+      try {
+        const result = await apiRequest<{
+          data: OfficeNotification[];
+          meta: { count: number };
+        }>('/office/notifications');
+        if (!mounted) return;
+        if (notificationsInitialized.current) {
+          const newImportant = result.data.find(
+            (item) =>
+              item.type === 'message' &&
+              ['high', 'urgent'].includes(item.severity ?? '') &&
+              !knownNotificationIds.current.has(item.id),
+          );
+          if (newImportant) signalOperationalNotification(newImportant);
+        }
+        result.data.forEach((item) =>
+          knownNotificationIds.current.add(item.id),
+        );
+        notificationsInitialized.current = true;
+        setNotifications(result.data);
+      } catch {
+        // Header notifications recover on the next polling cycle.
+      }
+    }
+    void pollNotifications();
+    const timer = window.setInterval(pollNotifications, 3000);
+    return () => {
+      mounted = false;
+      window.clearInterval(timer);
+    };
+  }, []);
 
   useEffect(() => {
     function keydown(event: KeyboardEvent) {
@@ -305,6 +365,18 @@ export function OfficeShell({ children }: { children: ReactNode }) {
     setNotificationsOpen(false);
     setProfileOpen(false);
     router.push(href);
+  }
+
+  async function openNotification(notification: OfficeNotification) {
+    if (notification.message_id) {
+      await apiRequest(`/messages/${notification.message_id}/read`, {
+        method: 'PATCH',
+      }).catch(() => null);
+      setNotifications((current) =>
+        current.filter((item) => item.id !== notification.id),
+      );
+    }
+    navigate(notification.href);
   }
 
   async function acknowledgeCall(call: TelephonyCall) {
@@ -633,7 +705,7 @@ export function OfficeShell({ children }: { children: ReactNode }) {
             {notifications.map((notification) => (
               <button
                 key={notification.id}
-                onClick={() => navigate(notification.href)}
+                onClick={() => void openNotification(notification)}
                 className="w-full border-b px-5 py-4 text-left hover:bg-slate-50"
               >
                 <div className="text-sm font-semibold">

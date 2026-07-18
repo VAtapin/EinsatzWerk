@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\PartRequirement;
 use App\Models\ServiceOrder;
 use App\Models\StatusHistory;
+use App\Services\OperationalMessageService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -36,8 +37,11 @@ class PartRequirementController extends Controller
         return response()->json(['data' => $requirements]);
     }
 
-    public function transition(Request $request, string $partRequirement): JsonResponse
-    {
+    public function transition(
+        Request $request,
+        string $partRequirement,
+        OperationalMessageService $messages,
+    ): JsonResponse {
         $requirement = PartRequirement::query()
             ->where('organization_id', $request->user()->organization_id)
             ->findOrFail($partRequirement);
@@ -104,11 +108,41 @@ class PartRequirementController extends Controller
                 'created_at' => now(),
             ]);
         });
-
-        return response()->json(['data' => $requirement->refresh()->load([
+        $requirement->refresh()->load([
             'product',
             'serviceOrder.customer',
             'visit.technician',
-        ])]);
+        ]);
+        if ($requirement->visit?->technician) {
+            $statusLabels = [
+                'approved' => 'freigegeben',
+                'ordered' => 'bestellt',
+                'received' => 'eingetroffen',
+                'rejected' => 'abgelehnt',
+            ];
+            $messages->send(
+                $request->user(),
+                $requirement->visit->technician,
+                'Status der Teileanforderung geändert',
+                implode("\n", array_filter([
+                    $requirement->serviceOrder->order_number.' · '.
+                        $requirement->description,
+                    'Status: '.($statusLabels[$requirement->status] ?? $requirement->status),
+                    $requirement->office_notes,
+                ])),
+                $requirement->serviceOrder,
+                $requirement->visit,
+                in_array($requirement->status, ['received', 'rejected'], true)
+                    ? 'high'
+                    : 'normal',
+                false,
+                [
+                    'event' => 'part_requirement_'.$requirement->status,
+                    'part_requirement_id' => $requirement->id,
+                ],
+            );
+        }
+
+        return response()->json(['data' => $requirement]);
     }
 }

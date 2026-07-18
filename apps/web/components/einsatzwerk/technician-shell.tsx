@@ -1,11 +1,12 @@
 'use client';
 
-import { ReactNode, useEffect, useState } from 'react';
+import { ReactNode, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   Bell,
   CalendarCheck,
+  CheckCircle2,
   ClipboardList,
   Ellipsis,
   LogOut,
@@ -14,6 +15,7 @@ import {
   Plus,
   Settings,
   UserRound,
+  X,
 } from 'lucide-react';
 import { apiRequest, clearAccessToken } from '@/lib/einsatzwerk-api';
 import { EinsatzWerkBrand } from './brand';
@@ -26,6 +28,57 @@ const nav = [
   { href: '/technician/more', label: 'Mehr', icon: Ellipsis },
 ];
 
+type TechnicianAlert = {
+  id: string;
+  subject: string;
+  body: string;
+  severity: string;
+  requires_ack: boolean;
+  acknowledged_at: string | null;
+  read_at: string | null;
+  sender: { id: string; name: string };
+  service_order: { id: string; order_number: string } | null;
+  visit: { id: string } | null;
+  metadata: {
+    event?: string;
+    previous?: { planned_start_at?: string | null };
+    current?: { planned_start_at?: string | null };
+  } | null;
+};
+
+function playOperationalSignal(message: TechnicianAlert) {
+  navigator.vibrate?.([180, 100, 180]);
+  try {
+    const context = new AudioContext();
+    void context.resume().then(() => {
+      [0, 0.28, 0.56].forEach((offset) => {
+        const oscillator = context.createOscillator();
+        const gain = context.createGain();
+        oscillator.frequency.value = 820;
+        gain.gain.setValueAtTime(0.0001, context.currentTime + offset);
+        gain.gain.exponentialRampToValueAtTime(
+          0.18,
+          context.currentTime + offset + 0.02,
+        );
+        gain.gain.exponentialRampToValueAtTime(
+          0.0001,
+          context.currentTime + offset + 0.18,
+        );
+        oscillator.connect(gain);
+        gain.connect(context.destination);
+        oscillator.start(context.currentTime + offset);
+        oscillator.stop(context.currentTime + offset + 0.2);
+      });
+      window.setTimeout(() => void context.close(), 1000);
+    });
+  } catch {
+    // Mobile browsers can block sound until the first interaction.
+  }
+  if ('Notification' in window && Notification.permission === 'granted') {
+    new Notification(message.subject, { body: message.body });
+  }
+}
+
 export function TechnicianShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -35,6 +88,10 @@ export function TechnicianShell({ children }: { children: ReactNode }) {
     email: '',
   });
   const [unread, setUnread] = useState(0);
+  const [criticalAlert, setCriticalAlert] = useState<TechnicianAlert | null>(
+    null,
+  );
+  const notified = useRef(new Set<string>());
 
   useEffect(() => {
     apiRequest<{
@@ -42,19 +99,61 @@ export function TechnicianShell({ children }: { children: ReactNode }) {
     }>('/auth/me')
       .then((result) => {
         setProfile(result.user);
-        return apiRequest<{
-          data: Array<{ read_at: string | null; sender: { id: string } }>;
-        }>('/technician/messages').then((messages) =>
-          setUnread(
-            messages.data.filter(
-              (message) =>
-                message.read_at === null && message.sender.id !== result.user.id,
-            ).length,
-          ),
-        );
       })
       .catch(() => null);
-  }, [pathname]);
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    async function pollMessages() {
+      try {
+        const result = await apiRequest<{
+          data: TechnicianAlert[];
+          meta: { unread: number };
+        }>('/technician/messages?unread=1&limit=50');
+        if (!mounted) return;
+        setUnread(result.meta.unread);
+        const critical = result.data.find(
+          (message) =>
+            message.requires_ack &&
+            !message.acknowledged_at &&
+            message.sender.id !== profile.id,
+        );
+        if (critical) {
+          setCriticalAlert(critical);
+          if (!notified.current.has(critical.id)) {
+            notified.current.add(critical.id);
+            playOperationalSignal(critical);
+          }
+        }
+      } catch {
+        // Keep the field interface usable while connectivity is interrupted.
+      }
+    }
+    void pollMessages();
+    const timer = window.setInterval(pollMessages, 2500);
+    return () => {
+      mounted = false;
+      window.clearInterval(timer);
+    };
+  }, [profile.id]);
+
+  async function acknowledgeAlert(open = false) {
+    if (!criticalAlert) return;
+    const alert = criticalAlert;
+    await apiRequest(`/technician/messages/${alert.id}/acknowledge`, {
+      method: 'POST',
+    }).catch(() => null);
+    setCriticalAlert(null);
+    setUnread((current) => Math.max(0, current - 1));
+    if (open) {
+      router.push(
+        alert.visit?.id
+          ? `/technician/visits/${alert.visit.id}`
+          : '/technician/messages',
+      );
+    }
+  }
 
   async function logout() {
     await apiRequest('/auth/logout', { method: 'POST' }).catch(() => null);
@@ -185,6 +284,75 @@ export function TechnicianShell({ children }: { children: ReactNode }) {
           })}
         </nav>
       </div>
+
+      {criticalAlert && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#061b31]/70 p-4 backdrop-blur-sm">
+          <section className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <header className="flex items-start justify-between bg-[#ff5a0a] p-5 text-white">
+              <div>
+                <div className="text-xs font-bold tracking-wider uppercase opacity-80">
+                  Wichtige Änderung
+                </div>
+                <h2 className="mt-1 text-xl font-bold">
+                  {criticalAlert.subject}
+                </h2>
+              </div>
+              <button
+                onClick={() => setCriticalAlert(null)}
+                className="rounded-lg p-1 hover:bg-white/15"
+              >
+                <X className="size-5" />
+              </button>
+            </header>
+            <div className="p-5">
+              {criticalAlert.service_order && (
+                <div className="mb-3 text-sm font-semibold text-[#ff5a0a]">
+                  {criticalAlert.service_order.order_number}
+                </div>
+              )}
+              <p className="whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                {criticalAlert.body}
+              </p>
+              {criticalAlert.metadata?.previous?.planned_start_at &&
+                criticalAlert.metadata?.current?.planned_start_at && (
+                  <div className="mt-5 grid grid-cols-[1fr_auto_1fr] items-center gap-3 rounded-xl bg-slate-50 p-4 text-sm">
+                    <div>
+                      <div className="text-xs text-slate-500">Bisher</div>
+                      <div className="mt-1 font-semibold">
+                        {new Date(
+                          criticalAlert.metadata.previous.planned_start_at,
+                        ).toLocaleString('de-DE')}
+                      </div>
+                    </div>
+                    <span className="text-slate-400">→</span>
+                    <div>
+                      <div className="text-xs text-slate-500">Neu</div>
+                      <div className="mt-1 font-semibold text-[#ff5a0a]">
+                        {new Date(
+                          criticalAlert.metadata.current.planned_start_at,
+                        ).toLocaleString('de-DE')}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              <div className="mt-6 grid grid-cols-2 gap-3">
+                <button
+                  onClick={() => void acknowledgeAlert(false)}
+                  className="flex h-12 items-center justify-center gap-2 rounded-xl border font-semibold"
+                >
+                  <CheckCircle2 className="size-5" /> Übernommen
+                </button>
+                <button
+                  onClick={() => void acknowledgeAlert(true)}
+                  className="h-12 rounded-xl bg-[#ff5a0a] font-semibold text-white"
+                >
+                  Änderung öffnen
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 }

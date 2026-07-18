@@ -8,6 +8,7 @@ use App\Models\ServiceOrder;
 use App\Models\StatusHistory;
 use App\Models\User;
 use App\Models\Visit;
+use App\Services\OperationalMessageService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -145,8 +146,11 @@ class ServiceOrderController extends Controller
         return response()->json(['data' => $technicians]);
     }
 
-    public function assign(Request $request, string $serviceOrder): JsonResponse
-    {
+    public function assign(
+        Request $request,
+        string $serviceOrder,
+        OperationalMessageService $messages,
+    ): JsonResponse {
         $organizationId = $request->user()->organization_id;
         $this->findForOrganization($request, $serviceOrder);
         $validated = $request->validate([
@@ -204,10 +208,97 @@ class ServiceOrderController extends Controller
 
             return $visit;
         });
+        $visit->load(['serviceOrder.customer', 'serviceOrder.serviceLocation', 'technician']);
+        $messages->send(
+            $request->user(),
+            $visit->technician,
+            'Neuer Einsatz zugewiesen',
+            implode("\n", array_filter([
+                $visit->serviceOrder->order_number.' · '.
+                    ($visit->serviceOrder->customer?->company_name ?: trim(
+                        ($visit->serviceOrder->customer?->first_name ?? '').' '.
+                        ($visit->serviceOrder->customer?->last_name ?? ''),
+                    )),
+                'Termin: '.$visit->planned_start_at?->format('d.m.Y H:i').
+                    '–'.$visit->planned_end_at?->format('H:i'),
+                $visit->serviceOrder->fault_description,
+            ])),
+            $visit->serviceOrder,
+            $visit,
+            'high',
+            true,
+            [
+                'event' => 'visit_assigned',
+                'current' => [
+                    'technician_id' => $visit->technician_id,
+                    'planned_start_at' => $visit->planned_start_at?->toISOString(),
+                    'planned_end_at' => $visit->planned_end_at?->toISOString(),
+                ],
+            ],
+        );
 
         return response()->json([
-            'data' => $visit->load(['serviceOrder.customer', 'technician']),
+            'data' => $visit,
         ], 201);
+    }
+
+    public function cancel(
+        Request $request,
+        string $serviceOrder,
+        OperationalMessageService $messages,
+    ): JsonResponse {
+        $validated = $request->validate([
+            'reason' => ['required', 'string', 'max:2000'],
+        ]);
+        $order = $this->findForOrganization($request, $serviceOrder);
+        abort_if(in_array($order->status, ['completed', 'cancelled'], true), 409);
+        $technicians = $order->visits()
+            ->whereNotIn('status', ['completed', 'cancelled'])
+            ->with('technician')
+            ->get()
+            ->pluck('technician')
+            ->filter()
+            ->unique('id');
+
+        DB::transaction(function () use ($request, $order, $validated): void {
+            $from = $order->status;
+            $order->visits()
+                ->whereNotIn('status', ['completed', 'cancelled'])
+                ->update([
+                    'status' => 'cancelled',
+                    'lock_version' => DB::raw('lock_version + 1'),
+                    'updated_at' => now(),
+                ]);
+            $order->update(['status' => 'cancelled']);
+            StatusHistory::query()->create([
+                'organization_id' => $order->organization_id,
+                'subject_type' => ServiceOrder::class,
+                'subject_id' => $order->id,
+                'from_status' => $from,
+                'to_status' => 'cancelled',
+                'changed_by' => $request->user()->id,
+                'reason' => $validated['reason'],
+                'created_at' => now(),
+            ]);
+        });
+
+        foreach ($technicians as $technician) {
+            $messages->send(
+                $request->user(),
+                $technician,
+                'Einsatz storniert',
+                $order->order_number."\n".$validated['reason'],
+                $order,
+                null,
+                'urgent',
+                true,
+                ['event' => 'order_cancelled'],
+            );
+        }
+
+        return response()->json([
+            'data' => $order->refresh()->load(['customer', 'visits.technician']),
+        ]);
     }
 
     private function findForOrganization(Request $request, string $id): ServiceOrder

@@ -19,6 +19,7 @@ import {
   MapPin,
   MessageSquare,
   PackageOpen,
+  Paperclip,
   Pencil,
   Phone,
   Plus,
@@ -1215,19 +1216,42 @@ type MessageItem = {
   subject: string;
   body: string;
   read_at: string | null;
+  acknowledged_at: string | null;
+  delivered_at: string | null;
+  severity: 'normal' | 'high' | 'urgent';
+  requires_ack: boolean;
+  type: string;
   created_at: string;
   sender: { id: string; name: string };
   recipient: { id: string; name: string } | null;
+  service_order: { id: string; order_number: string } | null;
+  visit: { id: string } | null;
+  attachments: Array<{
+    id: string;
+    original_name: string;
+    size: number;
+  }>;
 };
 
 export function MessagesPage() {
-  useOfficeAccess();
+  const router = useOfficeAccess();
   const [items, setItems] = useState<MessageItem[]>([]);
   const [technicians, setTechnicians] = useState<
     Array<{ id: string; name: string }>
   >([]);
+  const [orders, setOrders] = useState<
+    Array<{ id: string; order_number: string }>
+  >([]);
   const [compose, setCompose] = useState(false);
-  const [form, setForm] = useState({ recipient_id: '', subject: '', body: '' });
+  const [attachment, setAttachment] = useState<File | null>(null);
+  const [form, setForm] = useState({
+    recipient_id: '',
+    service_order_id: '',
+    subject: '',
+    body: '',
+    severity: 'normal',
+    requires_ack: false,
+  });
   const load = useCallback(async () => {
     const result = await apiRequest<{ data: MessageItem[] }>('/messages');
     setItems(result.data);
@@ -1239,24 +1263,62 @@ export function MessagesPage() {
     apiRequest<{ data: Array<{ id: string; name: string }> }>('/technicians')
       .then((result) => setTechnicians(result.data))
       .catch(() => null);
+    apiRequest<{
+      data: Array<{ id: string; order_number: string }>;
+    }>('/service-orders?per_page=100')
+      .then((result) => setOrders(result.data))
+      .catch(() => null);
+    const timer = window.setInterval(() => void load(), 3000);
+    return () => window.clearInterval(timer);
   }, [load]);
   async function send(event: FormEvent) {
     event.preventDefault();
     try {
-      await apiRequest('/messages', {
+      const result = await apiRequest<{ data: { id: string } }>('/messages', {
         method: 'POST',
         body: JSON.stringify({
           ...form,
           recipient_id: form.recipient_id || null,
+          service_order_id: form.service_order_id || null,
+          requires_ack: form.requires_ack && Boolean(form.recipient_id),
         }),
       });
-      setForm({ recipient_id: '', subject: '', body: '' });
+      if (attachment) {
+        const upload = new FormData();
+        upload.append('file', attachment);
+        await apiRequest(`/messages/${result.data.id}/attachments`, {
+          method: 'POST',
+          body: upload,
+        });
+      }
+      setForm({
+        recipient_id: '',
+        service_order_id: '',
+        subject: '',
+        body: '',
+        severity: 'normal',
+        requires_ack: false,
+      });
       setCompose(false);
+      setAttachment(null);
       toast.success('Nachricht wurde gesendet.');
       await load();
     } catch {
       toast.error('Nachricht konnte nicht gesendet werden.');
     }
+  }
+  async function markRead(message: MessageItem) {
+    if (message.read_at || !message.recipient) return;
+    await apiRequest(`/messages/${message.id}/read`, {
+      method: 'PATCH',
+    }).catch(() => null);
+    setItems((current) =>
+      current.map((item) =>
+        item.id === message.id
+          ? { ...item, read_at: new Date().toISOString() }
+          : item,
+      ),
+    );
   }
   return (
     <div className="min-w-[1000px] px-6 py-6">
@@ -1275,21 +1337,80 @@ export function MessagesPage() {
       <section className="overflow-hidden rounded-xl border bg-white">
         <div className="divide-y">
           {items.map((message) => (
-            <article key={message.id} className="flex gap-4 p-5">
-              <MessageSquare className="mt-1 size-5 text-blue-600" />
+            <article
+              key={message.id}
+              onClick={() => void markRead(message)}
+              className={`flex cursor-pointer gap-4 p-5 ${
+                !message.read_at && message.recipient
+                  ? 'bg-orange-50/50'
+                  : 'bg-white'
+              }`}
+            >
+              <MessageSquare
+                className={`mt-1 size-5 ${
+                  message.severity === 'urgent'
+                    ? 'text-red-600'
+                    : message.severity === 'high'
+                      ? 'text-orange-600'
+                      : 'text-blue-600'
+                }`}
+              />
               <div className="flex-1">
                 <div className="flex justify-between">
-                  <strong>{message.subject}</strong>
+                  <div className="flex items-center gap-2">
+                    <strong>{message.subject}</strong>
+                    {message.type === 'system' && (
+                      <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500 uppercase">
+                        System
+                      </span>
+                    )}
+                    {message.requires_ack && (
+                      <span className="rounded bg-orange-100 px-2 py-0.5 text-[10px] font-semibold text-orange-700">
+                        Bestätigung erforderlich
+                      </span>
+                    )}
+                  </div>
                   <span className="text-xs text-slate-500">
                     {new Date(message.created_at).toLocaleString('de-DE')}
                   </span>
                 </div>
                 <div className="mt-1 text-xs text-slate-500">
                   {message.sender.name} → {message.recipient?.name || 'Alle'}
+                  {message.service_order &&
+                    ` · ${message.service_order.order_number}`}
                 </div>
                 <p className="mt-3 whitespace-pre-wrap text-sm text-slate-700">
                   {message.body}
                 </p>
+                {message.service_order && (
+                  <button
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      router.push(
+                        `/office/orders?order=${message.service_order?.id}`,
+                      );
+                    }}
+                    className="mt-3 text-xs font-semibold text-blue-600"
+                  >
+                    Auftrag öffnen
+                  </button>
+                )}
+                {message.attachments?.map((attachment) => (
+                  <button
+                    key={attachment.id}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void apiDownload(
+                        `/messages/${message.id}/attachments/${attachment.id}`,
+                        attachment.original_name,
+                      );
+                    }}
+                    className="mt-3 mr-2 inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold"
+                  >
+                    <Paperclip className="size-3.5" />
+                    {attachment.original_name}
+                  </button>
+                ))}
               </div>
             </article>
           ))}
@@ -1331,6 +1452,59 @@ export function MessagesPage() {
                 </select>
               </label>
               <label className="block text-sm font-medium">
+                Auftrag (optional)
+                <select
+                  value={form.service_order_id}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      service_order_id: event.target.value,
+                    }))
+                  }
+                  className="mt-1 h-11 w-full rounded-lg border bg-white px-3"
+                >
+                  <option value="">Ohne Auftragsbezug</option>
+                  {orders.map((order) => (
+                    <option key={order.id} value={order.id}>
+                      {order.order_number}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="grid grid-cols-2 gap-4">
+                <label className="block text-sm font-medium">
+                  Dringlichkeit
+                  <select
+                    value={form.severity}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        severity: event.target.value,
+                      }))
+                    }
+                    className="mt-1 h-11 w-full rounded-lg border bg-white px-3"
+                  >
+                    <option value="normal">Normal</option>
+                    <option value="high">Wichtig</option>
+                    <option value="urgent">Dringend</option>
+                  </select>
+                </label>
+                <label className="flex items-end gap-2 pb-3 text-sm font-medium">
+                  <input
+                    type="checkbox"
+                    checked={form.requires_ack}
+                    disabled={!form.recipient_id}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        requires_ack: event.target.checked,
+                      }))
+                    }
+                  />
+                  Bestätigung verlangen
+                </label>
+              </div>
+              <label className="block text-sm font-medium">
                 Betreff
                 <input
                   required
@@ -1356,6 +1530,17 @@ export function MessagesPage() {
                     }))
                   }
                   className="mt-1 min-h-36 w-full rounded-lg border p-3"
+                />
+              </label>
+              <label className="block text-sm font-medium">
+                Anhang (optional)
+                <input
+                  type="file"
+                  accept=".jpg,.jpeg,.png,.webp,.pdf,.doc,.docx,.xls,.xlsx,.txt"
+                  onChange={(event) =>
+                    setAttachment(event.target.files?.[0] ?? null)
+                  }
+                  className="mt-1 block w-full rounded-lg border p-2 text-sm"
                 />
               </label>
             </div>
@@ -1416,7 +1601,12 @@ export function SettingsPage() {
     null,
   );
   const [saving, setSaving] = useState(false);
+  const [notificationPermission, setNotificationPermission] =
+    useState<NotificationPermission>('default');
   useEffect(() => {
+    if ('Notification' in window) {
+      setNotificationPermission(Notification.permission);
+    }
     Promise.all([
       apiRequest<{ data: OrganizationSettings }>('/settings'),
       apiRequest<{ data: TelephonyIntegration[] }>('/telephony/integrations'),
@@ -1506,6 +1696,17 @@ export function SettingsPage() {
     await navigator.clipboard.writeText(value);
     toast.success('In die Zwischenablage kopiert.');
   }
+  async function enableBrowserNotifications() {
+    if (!('Notification' in window)) {
+      toast.error('Dieser Browser unterstützt keine Systembenachrichtigungen.');
+      return;
+    }
+    const permission = await Notification.requestPermission();
+    setNotificationPermission(permission);
+    if (permission === 'granted') {
+      toast.success('Systembenachrichtigungen sind aktiviert.');
+    }
+  }
   async function save(event: FormEvent) {
     event.preventDefault();
     if (!form) return;
@@ -1590,6 +1791,30 @@ export function SettingsPage() {
           </footer>
         </form>
       )}
+
+      <section className="mt-6 rounded-xl border bg-white p-5">
+        <div className="flex items-center justify-between gap-6">
+          <div>
+            <div className="font-bold">Akustische Arbeitsplatzmeldungen</div>
+            <div className="mt-1 text-sm text-slate-500">
+              Systemmeldung und Ton bei Anrufen und wichtigen
+              Außendienstmeldungen.
+            </div>
+          </div>
+          <button
+            type="button"
+            disabled={notificationPermission === 'granted'}
+            onClick={() => void enableBrowserNotifications()}
+            className="h-11 rounded-lg bg-[#061b31] px-5 text-sm font-semibold text-white disabled:bg-emerald-600"
+          >
+            {notificationPermission === 'granted'
+              ? 'Aktiviert'
+              : notificationPermission === 'denied'
+                ? 'Im Browser blockiert'
+                : 'Aktivieren'}
+          </button>
+        </div>
+      </section>
 
       <section className="mt-6 overflow-hidden rounded-xl border bg-white">
         <header className="flex items-start justify-between border-b p-5">
