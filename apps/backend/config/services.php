@@ -1,6 +1,10 @@
 <?php
 
 return [
+    'frontend' => [
+        'url' => env('FRONTEND_URL', 'http://localhost:3000'),
+    ],
+
     'maps' => [
         'geocoding_provider' => env('MAP_GEOCODING_PROVIDER', 'nominatim'),
         'geocoding_url' => env('MAP_GEOCODING_URL', 'https://nominatim.openstreetmap.org'),

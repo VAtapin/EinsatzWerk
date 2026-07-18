@@ -1,6 +1,6 @@
 'use client';
 
-import { ReactNode, useEffect, useState } from 'react';
+import { ReactNode, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
@@ -85,6 +85,96 @@ type OfficeNotification = {
   created_at: string;
 };
 
+type TelephonyCustomer = {
+  id: string;
+  customer_number: string;
+  display_name: string;
+  primary_phone: string | null;
+  secondary_phone: string | null;
+  notes: string | null;
+  service_locations: Array<{
+    id: string;
+    street: string | null;
+    house_number: string | null;
+    postal_code: string | null;
+    city: string | null;
+    is_primary: boolean;
+  }>;
+  assets: Array<{
+    id: string;
+    model: string | null;
+    serial_number: string | null;
+    manufacturer?: { name: string } | null;
+  }>;
+  open_orders: Array<{
+    id: string;
+    order_number: string;
+    status: string;
+    fault_description: string;
+  }>;
+};
+
+type TelephonyCall = {
+  id: string;
+  provider: string;
+  direction: string;
+  status: 'ringing' | 'accepted' | 'ended' | 'missed';
+  from_number: string | null;
+  to_number: string | null;
+  caller_name: string | null;
+  extension: string | null;
+  acknowledged_at: string | null;
+  customer: TelephonyCustomer | null;
+  matches: TelephonyCustomer[];
+  created_at: string;
+  updated_at: string;
+};
+
+function signalIncomingCall(call: TelephonyCall) {
+  document.title = `${call.from_number ?? 'Anruf'} · EinsatzWerk`;
+  window.setTimeout(() => {
+    document.title = 'EinsatzWerk';
+  }, 8000);
+
+  try {
+    const audioContext = new AudioContext();
+    void audioContext.resume().then(() => {
+      [0, 0.32].forEach((offset, index) => {
+        const oscillator = audioContext.createOscillator();
+        const gain = audioContext.createGain();
+        oscillator.type = 'sine';
+        oscillator.frequency.value = index === 0 ? 740 : 880;
+        gain.gain.setValueAtTime(0.0001, audioContext.currentTime + offset);
+        gain.gain.exponentialRampToValueAtTime(
+          0.16,
+          audioContext.currentTime + offset + 0.02,
+        );
+        gain.gain.exponentialRampToValueAtTime(
+          0.0001,
+          audioContext.currentTime + offset + 0.24,
+        );
+        oscillator.connect(gain);
+        gain.connect(audioContext.destination);
+        oscillator.start(audioContext.currentTime + offset);
+        oscillator.stop(audioContext.currentTime + offset + 0.25);
+      });
+      window.setTimeout(() => void audioContext.close(), 900);
+    });
+  } catch {
+    // Some browsers block sound before the first user interaction.
+  }
+
+  if ('Notification' in window && Notification.permission === 'granted') {
+    new Notification('Eingehender Anruf', {
+      body:
+        call.customer?.display_name ||
+        call.caller_name ||
+        call.from_number ||
+        'Unbekannter Anrufer',
+    });
+  }
+}
+
 export function OfficeShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -97,6 +187,9 @@ export function OfficeShell({ children }: { children: ReactNode }) {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [incomingCall, setIncomingCall] = useState<TelephonyCall | null>(null);
+  const telephonyCursor = useRef<string | null>(null);
+  const notifiedCalls = useRef(new Set<string>());
 
   useEffect(() => {
     apiRequest<{ user: CurrentUser }>('/auth/me')
@@ -146,6 +239,61 @@ export function OfficeShell({ children }: { children: ReactNode }) {
     return () => window.clearTimeout(timer);
   }, [searchQuery]);
 
+  useEffect(() => {
+    let mounted = true;
+    let initialRequest = true;
+
+    async function pollTelephonyCalls() {
+      const query = initialRequest
+        ? '?active=1&limit=10'
+        : telephonyCursor.current
+          ? `?after=${encodeURIComponent(telephonyCursor.current)}&limit=20`
+          : '?limit=20';
+      initialRequest = false;
+
+      try {
+        const result = await apiRequest<{
+          data: TelephonyCall[];
+          meta: { server_time: string };
+        }>(`/telephony/calls${query}`);
+
+        if (!mounted) return;
+        telephonyCursor.current = result.meta.server_time;
+        const newIncomingCall = result.data.find(
+          (call) =>
+            call.direction === 'incoming' &&
+            !call.acknowledged_at &&
+            ['ringing', 'accepted', 'missed'].includes(call.status),
+        );
+        if (newIncomingCall && !notifiedCalls.current.has(newIncomingCall.id)) {
+          notifiedCalls.current.add(newIncomingCall.id);
+          signalIncomingCall(newIncomingCall);
+        }
+        setIncomingCall((current) => {
+          const updatedCurrent = current
+            ? result.data.find((call) => call.id === current.id)
+            : null;
+
+          if (updatedCurrent?.acknowledged_at) return null;
+          if (updatedCurrent?.status === 'ended') return null;
+          if (updatedCurrent) return updatedCurrent;
+
+          return newIncomingCall ?? current ?? null;
+        });
+      } catch {
+        // Telephony is optional. The office remains usable while it is unavailable.
+      }
+    }
+
+    void pollTelephonyCalls();
+    const timer = window.setInterval(pollTelephonyCalls, 2000);
+
+    return () => {
+      mounted = false;
+      window.clearInterval(timer);
+    };
+  }, []);
+
   async function logout() {
     await apiRequest('/auth/logout', { method: 'POST' }).catch(() => null);
     clearAccessToken();
@@ -157,6 +305,33 @@ export function OfficeShell({ children }: { children: ReactNode }) {
     setNotificationsOpen(false);
     setProfileOpen(false);
     router.push(href);
+  }
+
+  async function acknowledgeCall(call: TelephonyCall) {
+    await apiRequest(`/telephony/calls/${call.id}/acknowledge`, {
+      method: 'POST',
+    }).catch(() => null);
+    setIncomingCall(null);
+  }
+
+  async function openIncomingCall(
+    call: TelephonyCall,
+    customer: TelephonyCustomer | null = call.customer,
+  ) {
+    await apiRequest(`/telephony/calls/${call.id}/acknowledge`, {
+      method: 'POST',
+    }).catch(() => null);
+
+    const parameters = new URLSearchParams({
+      source: 'telephony',
+      call: call.id,
+    });
+    if (call.from_number) parameters.set('phone', call.from_number);
+    if (customer) parameters.set('customer', customer.id);
+    else parameters.set('new', '1');
+
+    setIncomingCall(null);
+    router.push(`/office/call-intake?${parameters.toString()}`);
   }
 
   const initials = (user?.name ?? 'EinsatzWerk')
@@ -281,9 +456,13 @@ export function OfficeShell({ children }: { children: ReactNode }) {
                 {initials}
               </div>
               <div className="text-sm">
-                <div className="font-semibold">{user?.name ?? 'Wird geladen…'}</div>
+                <div className="font-semibold">
+                  {user?.name ?? 'Wird geladen…'}
+                </div>
                 <div className="text-xs text-white/65">
-                  {user?.role === 'office_admin' ? 'Office Admin' : 'Disposition'}
+                  {user?.role === 'office_admin'
+                    ? 'Office Admin'
+                    : 'Disposition'}
                 </div>
               </div>
               <ChevronDown className="size-4 text-white/70" />
@@ -293,6 +472,149 @@ export function OfficeShell({ children }: { children: ReactNode }) {
 
         <main>{children}</main>
       </div>
+
+      {incomingCall && (
+        <section
+          role="dialog"
+          aria-label="Eingehender Anruf"
+          className="fixed top-[86px] right-6 z-[65] w-[430px] overflow-hidden rounded-2xl border border-orange-200 bg-white text-[#10213d] shadow-2xl"
+        >
+          <div className="flex items-start justify-between bg-[#ff5a0a] px-5 py-4 text-white">
+            <div className="flex gap-3">
+              <div className="flex size-11 shrink-0 items-center justify-center rounded-full bg-white/20">
+                <Phone className="size-6" />
+              </div>
+              <div>
+                <div className="text-xs font-bold tracking-wider uppercase opacity-80">
+                  {incomingCall.status === 'missed'
+                    ? 'Verpasster Anruf'
+                    : 'Eingehender Anruf'}
+                </div>
+                <div className="mt-1 text-xl font-bold">
+                  {incomingCall.caller_name ||
+                    incomingCall.customer?.display_name ||
+                    incomingCall.from_number ||
+                    'Unbekannter Anrufer'}
+                </div>
+                {incomingCall.from_number && (
+                  <div className="mt-0.5 text-sm opacity-90">
+                    {incomingCall.from_number}
+                  </div>
+                )}
+              </div>
+            </div>
+            <button
+              onClick={() => void acknowledgeCall(incomingCall)}
+              title="Schließen"
+              className="rounded-lg p-1.5 hover:bg-white/15"
+            >
+              <X className="size-5" />
+            </button>
+          </div>
+
+          <div className="p-5">
+            {incomingCall.customer && (
+              <>
+                <div className="rounded-xl border bg-slate-50 p-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <div className="font-bold">
+                        {incomingCall.customer.display_name}
+                      </div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        {incomingCall.customer.customer_number}
+                      </div>
+                    </div>
+                    <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+                      Kunde erkannt
+                    </span>
+                  </div>
+                  {incomingCall.customer.service_locations[0] && (
+                    <div className="mt-3 text-sm text-slate-600">
+                      {[
+                        incomingCall.customer.service_locations[0].street,
+                        incomingCall.customer.service_locations[0].house_number,
+                        incomingCall.customer.service_locations[0].postal_code,
+                        incomingCall.customer.service_locations[0].city,
+                      ]
+                        .filter(Boolean)
+                        .join(' ')}
+                    </div>
+                  )}
+                  <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                    <div className="rounded-lg bg-white p-3">
+                      <div className="text-xs text-slate-500">Geräte</div>
+                      <div className="mt-1 font-bold">
+                        {incomingCall.customer.assets.length}
+                      </div>
+                    </div>
+                    <div className="rounded-lg bg-white p-3">
+                      <div className="text-xs text-slate-500">
+                        Offene Aufträge
+                      </div>
+                      <div className="mt-1 font-bold">
+                        {incomingCall.customer.open_orders.length}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <button
+                  onClick={() => void openIncomingCall(incomingCall)}
+                  className="mt-4 h-12 w-full rounded-xl bg-[#ff5a0a] font-bold text-white hover:bg-[#e84e00]"
+                >
+                  Kundendaten in Anrufannahme öffnen
+                </button>
+              </>
+            )}
+
+            {!incomingCall.customer && incomingCall.matches.length > 1 && (
+              <>
+                <div className="mb-3 text-sm font-semibold">
+                  Mehrere Kunden passen zu dieser Nummer:
+                </div>
+                <div className="space-y-2">
+                  {incomingCall.matches.map((customer) => (
+                    <button
+                      key={customer.id}
+                      onClick={() =>
+                        void openIncomingCall(incomingCall, customer)
+                      }
+                      className="flex w-full items-center justify-between rounded-xl border p-3 text-left hover:border-orange-300 hover:bg-orange-50"
+                    >
+                      <span>
+                        <span className="block font-semibold">
+                          {customer.display_name}
+                        </span>
+                        <span className="text-xs text-slate-500">
+                          {customer.customer_number}
+                        </span>
+                      </span>
+                      <ChevronDown className="-rotate-90 size-4" />
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {!incomingCall.customer && incomingCall.matches.length <= 1 && (
+              <>
+                <div className="rounded-xl border border-dashed p-5 text-center">
+                  <div className="font-semibold">Nummer nicht zugeordnet</div>
+                  <div className="mt-1 text-sm text-slate-500">
+                    Der Anruf kann direkt als neuer Kunde aufgenommen werden.
+                  </div>
+                </div>
+                <button
+                  onClick={() => void openIncomingCall(incomingCall, null)}
+                  className="mt-4 h-12 w-full rounded-xl bg-[#ff5a0a] font-bold text-white hover:bg-[#e84e00]"
+                >
+                  In Anrufannahme übernehmen
+                </button>
+              </>
+            )}
+          </div>
+        </section>
+      )}
 
       {notificationsOpen && (
         <div className="fixed top-[66px] right-6 z-50 w-[380px] overflow-hidden rounded-xl border bg-white text-[#10213d] shadow-2xl">
@@ -314,7 +636,9 @@ export function OfficeShell({ children }: { children: ReactNode }) {
                 onClick={() => navigate(notification.href)}
                 className="w-full border-b px-5 py-4 text-left hover:bg-slate-50"
               >
-                <div className="text-sm font-semibold">{notification.title}</div>
+                <div className="text-sm font-semibold">
+                  {notification.title}
+                </div>
                 <div className="mt-1 text-xs text-slate-500">
                   {notification.body}
                 </div>

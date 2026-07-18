@@ -1,6 +1,6 @@
 'use client';
 
-import { type FormEvent, useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Check,
@@ -102,6 +102,7 @@ function Panel({
 
 export default function CallIntakePage() {
   const router = useRouter();
+  const requestedCustomerId = useRef<string | null>(null);
   const [query, setQuery] = useState('');
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [customerId, setCustomerId] = useState('');
@@ -141,6 +142,19 @@ export default function CallIntakePage() {
     emptyCustomer;
 
   useEffect(() => {
+    const parameters = new URLSearchParams(window.location.search);
+    const phone = parameters.get('phone');
+    const customer = parameters.get('customer');
+
+    if (customer) requestedCustomerId.current = customer;
+    if (phone) {
+      setQuery(phone);
+      setNewCustomer((current) => ({ ...current, primary_phone: phone }));
+    }
+    if (parameters.get('new') === '1') setShowNewCustomer(true);
+  }, []);
+
+  useEffect(() => {
     setAssetId((current) =>
       selectedCustomer.assets.some((asset) => asset.id === current)
         ? current
@@ -160,11 +174,20 @@ export default function CallIntakePage() {
           `/customers/search?q=${encodeURIComponent(query)}`,
         );
         setCustomers(result.data);
-        setCustomerId((current) =>
-          result.data.some((customer) => customer.id === current)
+        setCustomerId((current) => {
+          const requested = requestedCustomerId.current;
+          if (
+            requested &&
+            result.data.some((customer) => customer.id === requested)
+          ) {
+            requestedCustomerId.current = null;
+            return requested;
+          }
+
+          return result.data.some((customer) => customer.id === current)
             ? current
-            : (result.data[0]?.id ?? ''),
-        );
+            : (result.data[0]?.id ?? '');
+        });
       } catch (exception) {
         const status = (exception as Error & { status?: number }).status;
         if (status === 401) router.replace('/login');

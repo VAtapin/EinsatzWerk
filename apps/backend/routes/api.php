@@ -13,11 +13,22 @@ use App\Http\Controllers\Api\V1\OfficeWorkspaceController;
 use App\Http\Controllers\Api\V1\PartRequirementController;
 use App\Http\Controllers\Api\V1\ServiceOrderController;
 use App\Http\Controllers\Api\V1\TechnicianVisitController;
+use App\Http\Controllers\Api\V1\TelephonyController;
+use App\Http\Controllers\Api\V1\TelephonyWebhookController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function (): void {
     Route::post('auth/login', [AuthController::class, 'login'])
         ->middleware('throttle:10,1');
+    Route::get(
+        'telephony/{provider}/{key}/contacts',
+        [TelephonyWebhookController::class, 'contacts'],
+    )->middleware('throttle:120,1');
+    Route::match(
+        ['post', 'put'],
+        'telephony/{provider}/{key}/events',
+        [TelephonyWebhookController::class, 'events'],
+    )->middleware('throttle:300,1');
 
     Route::middleware('auth:sanctum')->group(function (): void {
         Route::get('auth/me', [AuthController::class, 'me']);
@@ -25,6 +36,13 @@ Route::prefix('v1')->group(function (): void {
         Route::middleware('ability:office')->group(function (): void {
             Route::get('office/search', [OfficeShellController::class, 'search']);
             Route::get('office/notifications', [OfficeShellController::class, 'notifications']);
+            Route::get('telephony/integrations', [TelephonyController::class, 'integrations']);
+            Route::post('telephony/integrations', [TelephonyController::class, 'storeIntegration']);
+            Route::patch('telephony/integrations/{telephonyIntegration}', [TelephonyController::class, 'updateIntegration']);
+            Route::post('telephony/integrations/{telephonyIntegration}/rotate-key', [TelephonyController::class, 'rotateIntegrationKey']);
+            Route::get('telephony/calls', [TelephonyController::class, 'calls']);
+            Route::post('telephony/calls/{telephonyCall}/acknowledge', [TelephonyController::class, 'acknowledge']);
+            Route::post('telephony/simulate', [TelephonyController::class, 'simulate']);
             Route::get('office/analytics', [OfficeWorkspaceController::class, 'analytics']);
             Route::get('assets', [OfficeWorkspaceController::class, 'assets']);
             Route::get('technicians/workspace', [OfficeWorkspaceController::class, 'technicians']);

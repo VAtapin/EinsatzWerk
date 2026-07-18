@@ -49,4 +49,9 @@ class Organization extends Model
     {
         return $this->hasMany(Customer::class);
     }
+
+    public function telephonyIntegrations(): HasMany
+    {
+        return $this->hasMany(TelephonyIntegration::class);
+    }
 }

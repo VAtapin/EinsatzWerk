@@ -1,18 +1,26 @@
 'use client';
 
-import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type FormEvent,
+} from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Activity,
   BarChart3,
   Boxes,
   CheckCircle2,
+  Copy,
   FileDown,
   FileText,
   MapPin,
   MessageSquare,
   PackageOpen,
   Pencil,
+  Phone,
   Plus,
   Search,
   Send,
@@ -23,11 +31,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import {
-  apiDownload,
-  apiRequest,
-  getAccessToken,
-} from '@/lib/einsatzwerk-api';
+import { apiDownload, apiRequest, getAccessToken } from '@/lib/einsatzwerk-api';
 
 function useOfficeAccess() {
   const router = useRouter();
@@ -135,11 +139,16 @@ export function AnalyticsPage() {
           <h2 className="font-bold">Aufträge der letzten 14 Tage</h2>
           <div className="mt-6 flex h-64 items-end gap-2">
             {data?.daily_orders.map((point) => (
-              <div key={point.day} className="flex flex-1 flex-col items-center gap-2">
+              <div
+                key={point.day}
+                className="flex flex-1 flex-col items-center gap-2"
+              >
                 <span className="text-xs font-semibold">{point.total}</span>
                 <div
                   className="w-full rounded-t bg-blue-500"
-                  style={{ height: `${Math.max(8, (point.total / maximum) * 190)}px` }}
+                  style={{
+                    height: `${Math.max(8, (point.total / maximum) * 190)}px`,
+                  }}
                 />
                 <span className="text-[10px] text-slate-500">
                   {new Date(point.day).toLocaleDateString('de-DE', {
@@ -150,29 +159,33 @@ export function AnalyticsPage() {
               </div>
             ))}
             {!data?.daily_orders.length && (
-              <div className="m-auto text-sm text-slate-500">Noch keine Aufträge.</div>
+              <div className="m-auto text-sm text-slate-500">
+                Noch keine Aufträge.
+              </div>
             )}
           </div>
         </section>
         <section className="rounded-xl border bg-white p-5">
           <h2 className="font-bold">Aufträge nach Status</h2>
           <div className="mt-4 space-y-3">
-            {Object.entries(data?.status_counts ?? {}).map(([status, total]) => (
-              <div key={status}>
-                <div className="mb-1 flex justify-between text-sm">
-                  <span>{statusNames[status] ?? status}</span>
-                  <strong>{total}</strong>
+            {Object.entries(data?.status_counts ?? {}).map(
+              ([status, total]) => (
+                <div key={status}>
+                  <div className="mb-1 flex justify-between text-sm">
+                    <span>{statusNames[status] ?? status}</span>
+                    <strong>{total}</strong>
+                  </div>
+                  <div className="h-2 rounded bg-slate-100">
+                    <div
+                      className="h-2 rounded bg-[#ff5a0a]"
+                      style={{
+                        width: `${Math.max(4, (total / Math.max(1, summary.orders ?? 0)) * 100)}%`,
+                      }}
+                    />
+                  </div>
                 </div>
-                <div className="h-2 rounded bg-slate-100">
-                  <div
-                    className="h-2 rounded bg-[#ff5a0a]"
-                    style={{
-                      width: `${Math.max(4, (total / Math.max(1, summary.orders ?? 0)) * 100)}%`,
-                    }}
-                  />
-                </div>
-              </div>
-            ))}
+              ),
+            )}
           </div>
         </section>
         <section className="rounded-xl border bg-white p-5">
@@ -312,12 +325,15 @@ export function AssetsPage() {
                 className="cursor-pointer border-t hover:bg-slate-50"
               >
                 <td className="px-4 py-4 font-semibold">
-                  {[asset.manufacturer?.name, asset.model].filter(Boolean).join(' ') ||
-                    'Gerät'}
+                  {[asset.manufacturer?.name, asset.model]
+                    .filter(Boolean)
+                    .join(' ') || 'Gerät'}
                 </td>
                 <td className="px-4 py-4 text-slate-600">
                   <div>SN: {asset.serial_number || '—'}</div>
-                  <div className="text-xs">FD: {asset.production_number || '—'}</div>
+                  <div className="text-xs">
+                    FD: {asset.production_number || '—'}
+                  </div>
                 </td>
                 <td className="px-4 py-4">
                   {asset.customer.company_name ||
@@ -396,8 +412,9 @@ export function TechniciansPage() {
     password: '',
   });
   const load = useCallback(async () => {
-    const result =
-      await apiRequest<{ data: TechnicianItem[] }>('/technicians/workspace');
+    const result = await apiRequest<{ data: TechnicianItem[] }>(
+      '/technicians/workspace',
+    );
     setItems(result.data);
   }, []);
   useEffect(() => {
@@ -427,7 +444,9 @@ export function TechniciansPage() {
       );
       await load();
       setEditing(null);
-      toast.success(isNew ? 'Techniker wurde angelegt.' : 'Techniker wurde gespeichert.');
+      toast.success(
+        isNew ? 'Techniker wurde angelegt.' : 'Techniker wurde gespeichert.',
+      );
     } catch {
       toast.error('Techniker konnte nicht gespeichert werden.');
     } finally {
@@ -500,32 +519,48 @@ export function TechniciansPage() {
               <tr key={technician.id} className="border-t align-top">
                 <td className="px-4 py-4">
                   <div className="font-semibold">{technician.name}</div>
-                  <div className="text-xs text-slate-500">{technician.email}</div>
-                  <div className="text-xs text-slate-500">{technician.phone || '—'}</div>
+                  <div className="text-xs text-slate-500">
+                    {technician.email}
+                  </div>
+                  <div className="text-xs text-slate-500">
+                    {technician.phone || '—'}
+                  </div>
                 </td>
                 <td className="px-4 py-4">
                   <span className="rounded bg-emerald-100 px-2 py-1 text-xs text-emerald-700">
-                    {technician.status === 'active' ? 'Aktiv' : technician.status}
+                    {technician.status === 'active'
+                      ? 'Aktiv'
+                      : technician.status}
                   </span>
                 </td>
-                <td className="px-4 py-4 font-semibold">{technician.visits_today}</td>
+                <td className="px-4 py-4 font-semibold">
+                  {technician.visits_today}
+                </td>
                 <td className="px-4 py-4">
                   {technician.visits_open} / {technician.visits_total}
                 </td>
                 <td className="px-4 py-4">
                   <div className="space-y-1">
                     {technician.assigned_visits.map((visit) => (
-                      <div key={visit.id} className="rounded bg-slate-50 px-3 py-2 text-xs">
-                        {new Date(visit.planned_start_at).toLocaleTimeString('de-DE', {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}{' '}
+                      <div
+                        key={visit.id}
+                        className="rounded bg-slate-50 px-3 py-2 text-xs"
+                      >
+                        {new Date(visit.planned_start_at).toLocaleTimeString(
+                          'de-DE',
+                          {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          },
+                        )}{' '}
                         · {visit.service_order.order_number} ·{' '}
                         {visit.service_order.customer.last_name}
                       </div>
                     ))}
                     {!technician.assigned_visits.length && (
-                      <span className="text-slate-400">Keine Einsätze heute</span>
+                      <span className="text-slate-400">
+                        Keine Einsätze heute
+                      </span>
                     )}
                   </div>
                 </td>
@@ -664,11 +699,15 @@ export function ServiceAreasPage() {
   });
   const [saving, setSaving] = useState(false);
   const load = useCallback(async () => {
-    const result = await apiRequest<{ data: ServiceAreaItem[] }>('/service-areas');
+    const result = await apiRequest<{ data: ServiceAreaItem[] }>(
+      '/service-areas',
+    );
     setItems(result.data);
   }, []);
   useEffect(() => {
-    load().catch(() => toast.error('Servicebereiche konnten nicht geladen werden.'));
+    load().catch(() =>
+      toast.error('Servicebereiche konnten nicht geladen werden.'),
+    );
   }, [load]);
   function openArea(area?: ServiceAreaItem) {
     setEditing(area?.id ?? '');
@@ -720,9 +759,12 @@ export function ServiceAreasPage() {
   }
   async function deletePostalCode(areaId: string, postalCodeId: string) {
     try {
-      await apiRequest(`/service-areas/${areaId}/postal-codes/${postalCodeId}`, {
-        method: 'DELETE',
-      });
+      await apiRequest(
+        `/service-areas/${areaId}/postal-codes/${postalCodeId}`,
+        {
+          method: 'DELETE',
+        },
+      );
       await load();
     } catch {
       toast.error('Postleitzahl konnte nicht entfernt werden.');
@@ -821,7 +863,9 @@ export function ServiceAreasPage() {
             className="w-full max-w-lg rounded-2xl bg-white shadow-2xl"
           >
             <header className="border-b p-5 text-lg font-bold">
-              {editing === '' ? 'Neuer Servicebereich' : 'Servicebereich bearbeiten'}
+              {editing === ''
+                ? 'Neuer Servicebereich'
+                : 'Servicebereich bearbeiten'}
             </header>
             <div className="grid grid-cols-2 gap-4 p-5">
               <label className="text-sm font-medium">
@@ -996,7 +1040,10 @@ export function DocumentsPage() {
   }, []);
   return (
     <div className="min-w-[1000px] px-6 py-6">
-      <PageHeader title="DOKUMENTE" description="Kunden- und Einsatzdokumente" />
+      <PageHeader
+        title="DOKUMENTE"
+        description="Kunden- und Einsatzdokumente"
+      />
       <div className="mb-4 flex gap-6 border-b">
         <button
           onClick={() => setTab('commercial')}
@@ -1050,7 +1097,9 @@ export function DocumentsPage() {
                   </td>
                   <td className="px-4 py-4">
                     {document.document_date
-                      ? new Date(document.document_date).toLocaleDateString('de-DE')
+                      ? new Date(document.document_date).toLocaleDateString(
+                          'de-DE',
+                        )
                       : '—'}
                   </td>
                   <td className="px-4 py-4">{document.lines_count}</td>
@@ -1076,7 +1125,8 @@ export function DocumentsPage() {
                 <FileText className="size-6 text-red-500" />
                 <div className="flex-1">
                   <div className="font-semibold">
-                    {document.visit.service_order.order_number} · {document.type}
+                    {document.visit.service_order.order_number} ·{' '}
+                    {document.type}
                   </div>
                   <div className="text-xs text-slate-500">
                     {document.visit.service_order.customer.last_name} ·{' '}
@@ -1100,7 +1150,10 @@ export function ReportsPage() {
     if (!data) return;
     const rows = [
       ['Kennzahl', 'Wert'],
-      ...Object.entries(data.summary).map(([key, value]) => [key, String(value)]),
+      ...Object.entries(data.summary).map(([key, value]) => [
+        key,
+        String(value),
+      ]),
       [],
       ['Status', 'Anzahl'],
       ...Object.entries(data.status_counts).map(([key, value]) => [
@@ -1170,9 +1223,9 @@ type MessageItem = {
 export function MessagesPage() {
   useOfficeAccess();
   const [items, setItems] = useState<MessageItem[]>([]);
-  const [technicians, setTechnicians] = useState<Array<{ id: string; name: string }>>(
-    [],
-  );
+  const [technicians, setTechnicians] = useState<
+    Array<{ id: string; name: string }>
+  >([]);
   const [compose, setCompose] = useState(false);
   const [form, setForm] = useState({ recipient_id: '', subject: '', body: '' });
   const load = useCallback(async () => {
@@ -1180,7 +1233,9 @@ export function MessagesPage() {
     setItems(result.data);
   }, []);
   useEffect(() => {
-    load().catch(() => toast.error('Nachrichten konnten nicht geladen werden.'));
+    load().catch(() =>
+      toast.error('Nachrichten konnten nicht geladen werden.'),
+    );
     apiRequest<{ data: Array<{ id: string; name: string }> }>('/technicians')
       .then((result) => setTechnicians(result.data))
       .catch(() => null);
@@ -1247,8 +1302,13 @@ export function MessagesPage() {
       </section>
       {compose && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-6">
-          <form onSubmit={send} className="w-full max-w-xl rounded-2xl bg-white">
-            <header className="border-b p-5 text-lg font-bold">Neue Nachricht</header>
+          <form
+            onSubmit={send}
+            className="w-full max-w-xl rounded-2xl bg-white"
+          >
+            <header className="border-b p-5 text-lg font-bold">
+              Neue Nachricht
+            </header>
             <div className="space-y-4 p-5">
               <label className="block text-sm font-medium">
                 Empfänger
@@ -1276,7 +1336,10 @@ export function MessagesPage() {
                   required
                   value={form.subject}
                   onChange={(event) =>
-                    setForm((current) => ({ ...current, subject: event.target.value }))
+                    setForm((current) => ({
+                      ...current,
+                      subject: event.target.value,
+                    }))
                   }
                   className="mt-1 h-11 w-full rounded-lg border px-3"
                 />
@@ -1287,7 +1350,10 @@ export function MessagesPage() {
                   required
                   value={form.body}
                   onChange={(event) =>
-                    setForm((current) => ({ ...current, body: event.target.value }))
+                    setForm((current) => ({
+                      ...current,
+                      body: event.target.value,
+                    }))
                   }
                   className="mt-1 min-h-36 w-full rounded-lg border p-3"
                 />
@@ -1321,24 +1387,137 @@ type OrganizationSettings = {
   settings: Record<string, unknown> | null;
 };
 
+type TelephonyIntegration = {
+  id: string;
+  provider: '3cx' | 'placetel' | 'generic';
+  name: string;
+  enabled: boolean;
+  calls_count: number;
+  last_event_at: string | null;
+};
+
+type TelephonyCredentials = {
+  key: string;
+  contact_lookup_url: string;
+  event_webhook_url: string;
+  placetel_subscription: Record<string, unknown> | null;
+};
+
 export function SettingsPage() {
   useOfficeAccess();
   const [form, setForm] = useState<OrganizationSettings | null>(null);
+  const [telephony, setTelephony] = useState<TelephonyIntegration[]>([]);
+  const [credentials, setCredentials] = useState<TelephonyCredentials | null>(
+    null,
+  );
+  const [creatingProvider, setCreatingProvider] = useState<string | null>(null);
+  const [testNumber, setTestNumber] = useState('');
+  const [testingIntegration, setTestingIntegration] = useState<string | null>(
+    null,
+  );
   const [saving, setSaving] = useState(false);
   useEffect(() => {
-    apiRequest<{ data: OrganizationSettings }>('/settings')
-      .then((result) => setForm(result.data))
+    Promise.all([
+      apiRequest<{ data: OrganizationSettings }>('/settings'),
+      apiRequest<{ data: TelephonyIntegration[] }>('/telephony/integrations'),
+    ])
+      .then(([settingsResult, telephonyResult]) => {
+        setForm(settingsResult.data);
+        setTelephony(telephonyResult.data);
+      })
       .catch(() => toast.error('Einstellungen konnten nicht geladen werden.'));
   }, []);
+
+  async function createTelephonyIntegration(
+    provider: TelephonyIntegration['provider'],
+  ) {
+    setCreatingProvider(provider);
+    try {
+      const result = await apiRequest<{
+        data: TelephonyIntegration;
+        credentials: TelephonyCredentials;
+      }>('/telephony/integrations', {
+        method: 'POST',
+        body: JSON.stringify({
+          provider,
+          name:
+            provider === '3cx'
+              ? '3CX Telefonanlage'
+              : provider === 'placetel'
+                ? 'Placetel'
+                : 'Weitere Telefonanlage',
+        }),
+      });
+      setTelephony((current) => [...current, result.data]);
+      setCredentials(result.credentials);
+      toast.success('Telefonie-Anbindung wurde angelegt.');
+    } catch {
+      toast.error('Telefonie-Anbindung konnte nicht angelegt werden.');
+    } finally {
+      setCreatingProvider(null);
+    }
+  }
+
+  async function toggleTelephonyIntegration(integration: TelephonyIntegration) {
+    try {
+      const result = await apiRequest<{ data: TelephonyIntegration }>(
+        `/telephony/integrations/${integration.id}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({ enabled: !integration.enabled }),
+        },
+      );
+      setTelephony((current) =>
+        current.map((item) =>
+          item.id === integration.id ? result.data : item,
+        ),
+      );
+    } catch {
+      toast.error('Telefonie-Anbindung konnte nicht geändert werden.');
+    }
+  }
+
+  async function simulateCall(integration: TelephonyIntegration) {
+    if (!testNumber.trim()) {
+      toast.error('Bitte eine Test-Rufnummer eingeben.');
+      return;
+    }
+    setTestingIntegration(integration.id);
+    try {
+      await apiRequest('/telephony/simulate', {
+        method: 'POST',
+        body: JSON.stringify({
+          integration_id: integration.id,
+          event: 'IncomingCall',
+          from: testNumber.trim(),
+          to: 'Zentrale',
+          caller_name: 'Testanruf',
+        }),
+      });
+      toast.success('Testanruf wurde an den Arbeitsplatz gesendet.');
+    } catch {
+      toast.error('Testanruf konnte nicht ausgelöst werden.');
+    } finally {
+      setTestingIntegration(null);
+    }
+  }
+
+  async function copyValue(value: string) {
+    await navigator.clipboard.writeText(value);
+    toast.success('In die Zwischenablage kopiert.');
+  }
   async function save(event: FormEvent) {
     event.preventDefault();
     if (!form) return;
     setSaving(true);
     try {
-      const result = await apiRequest<{ data: OrganizationSettings }>('/settings', {
-        method: 'PATCH',
-        body: JSON.stringify(form),
-      });
+      const result = await apiRequest<{ data: OrganizationSettings }>(
+        '/settings',
+        {
+          method: 'PATCH',
+          body: JSON.stringify(form),
+        },
+      );
       setForm(result.data);
       toast.success('Einstellungen wurden gespeichert.');
     } catch {
@@ -1369,7 +1548,9 @@ export function SettingsPage() {
                 {label}
                 <input
                   required={field !== 'legal_name'}
-                  value={String(form[field as keyof OrganizationSettings] ?? '')}
+                  value={String(
+                    form[field as keyof OrganizationSettings] ?? '',
+                  )}
                   onChange={(event) =>
                     setForm((current) =>
                       current
@@ -1387,7 +1568,9 @@ export function SettingsPage() {
                 value={form.locale}
                 onChange={(event) =>
                   setForm((current) =>
-                    current ? { ...current, locale: event.target.value } : current,
+                    current
+                      ? { ...current, locale: event.target.value }
+                      : current,
                   )
                 }
                 className="mt-1 h-11 w-full rounded-lg border bg-white px-3"
@@ -1406,6 +1589,156 @@ export function SettingsPage() {
             </button>
           </footer>
         </form>
+      )}
+
+      <section className="mt-6 overflow-hidden rounded-xl border bg-white">
+        <header className="flex items-start justify-between border-b p-5">
+          <div className="flex gap-3">
+            <Phone className="mt-0.5 size-5 text-[#ff5a0a]" />
+            <div>
+              <div className="font-bold">Telefonie & Screen Pop</div>
+              <div className="mt-1 text-sm text-slate-500">
+                Eingehende Anrufe erkennen und Kundendaten automatisch öffnen
+              </div>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            {(['3cx', 'placetel'] as const).map((provider) => (
+              <button
+                key={provider}
+                disabled={creatingProvider !== null}
+                onClick={() => void createTelephonyIntegration(provider)}
+                className="flex h-10 items-center gap-2 rounded-lg border px-4 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50"
+              >
+                <Plus className="size-4" />
+                {provider === '3cx' ? '3CX' : 'Placetel'} verbinden
+              </button>
+            ))}
+          </div>
+        </header>
+
+        <div className="p-5">
+          {telephony.length > 0 && (
+            <div className="mb-5 flex gap-3">
+              <input
+                value={testNumber}
+                onChange={(event) => setTestNumber(event.target.value)}
+                placeholder="Rufnummer für Testanruf"
+                className="h-10 flex-1 rounded-lg border px-3 text-sm"
+              />
+            </div>
+          )}
+
+          <div className="space-y-3">
+            {telephony.map((integration) => (
+              <div
+                key={integration.id}
+                className="flex items-center justify-between rounded-xl border p-4"
+              >
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold">{integration.name}</span>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                        integration.enabled
+                          ? 'bg-emerald-100 text-emerald-700'
+                          : 'bg-slate-100 text-slate-500'
+                      }`}
+                    >
+                      {integration.enabled ? 'Aktiv' : 'Inaktiv'}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    {integration.calls_count} Anrufe
+                    {integration.last_event_at
+                      ? ` · Letztes Ereignis ${new Date(
+                          integration.last_event_at,
+                        ).toLocaleString('de-DE')}`
+                      : ' · Noch kein Ereignis empfangen'}
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    disabled={
+                      !integration.enabled ||
+                      testingIntegration === integration.id
+                    }
+                    onClick={() => void simulateCall(integration)}
+                    className="h-9 rounded-lg border px-3 text-sm hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    Testanruf
+                  </button>
+                  <button
+                    onClick={() => void toggleTelephonyIntegration(integration)}
+                    className="h-9 rounded-lg border px-3 text-sm hover:bg-slate-50"
+                  >
+                    {integration.enabled ? 'Deaktivieren' : 'Aktivieren'}
+                  </button>
+                </div>
+              </div>
+            ))}
+            {telephony.length === 0 && (
+              <div className="rounded-xl border border-dashed p-8 text-center text-sm text-slate-500">
+                Noch keine Telefonanlage verbunden.
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {credentials && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-[#061b31]/55 p-6 backdrop-blur-sm">
+          <div className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-2xl">
+            <h2 className="text-xl font-bold">
+              Zugangsdaten der Telefonanlage
+            </h2>
+            <p className="mt-2 text-sm text-slate-500">
+              Diese geheimen URLs werden nur jetzt vollständig angezeigt.
+            </p>
+            <div className="mt-6 space-y-4">
+              {[
+                ['Kontaktsuche (3CX)', credentials.contact_lookup_url],
+                ['Ereignis-Webhook', credentials.event_webhook_url],
+              ].map(([label, value]) => (
+                <div key={label}>
+                  <div className="mb-1 text-xs font-semibold text-slate-500">
+                    {label}
+                  </div>
+                  <div className="flex gap-2">
+                    <code className="min-w-0 flex-1 overflow-x-auto rounded-lg bg-slate-100 p-3 text-xs">
+                      {value}
+                    </code>
+                    <button
+                      onClick={() => void copyValue(value)}
+                      title="Kopieren"
+                      className="rounded-lg border px-3 hover:bg-slate-50"
+                    >
+                      <Copy className="size-4" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {credentials.placetel_subscription && (
+                <div>
+                  <div className="mb-1 text-xs font-semibold text-slate-500">
+                    Placetel Subscription Body
+                  </div>
+                  <pre className="overflow-x-auto rounded-lg bg-slate-100 p-3 text-xs">
+                    {JSON.stringify(credentials.placetel_subscription, null, 2)}
+                  </pre>
+                </div>
+              )}
+            </div>
+            <div className="mt-6 flex justify-end">
+              <button
+                onClick={() => setCredentials(null)}
+                className="h-11 rounded-lg bg-[#ff5a0a] px-6 font-semibold text-white"
+              >
+                Zugangsdaten gespeichert
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
