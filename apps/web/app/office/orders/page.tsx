@@ -6,10 +6,14 @@ import {
   Ban,
   CalendarDays,
   Check,
+  ChevronRight,
   Clock3,
   Eye,
   Filter,
+  Mail,
   MapPin,
+  PackageOpen,
+  Phone,
   Search,
   UserRound,
   Wrench,
@@ -22,6 +26,45 @@ type Technician = {
   id: string;
   name: string;
   phone: string | null;
+};
+
+type CustomerAsset = {
+  id: string;
+  model: string | null;
+  serial_number: string | null;
+  production_number: string | null;
+  purchase_date: string | null;
+  status: string;
+  manufacturer: { id: string; name: string } | null;
+};
+
+type CustomerDetail = {
+  id: string;
+  customer_number: string;
+  legacy_customer_number: string | null;
+  first_name: string | null;
+  last_name: string;
+  company_name: string | null;
+  primary_phone: string | null;
+  secondary_phone: string | null;
+  email: string | null;
+  notes: string | null;
+  status: string;
+  service_locations: Array<{
+    id: string;
+    name: string | null;
+    contact_person: string | null;
+    street: string | null;
+    house_number: string | null;
+    postal_code: string | null;
+    city: string | null;
+    access_notes: string | null;
+    parking_notes: string | null;
+    is_primary: boolean;
+  }>;
+  assets: CustomerAsset[];
+  service_orders: Array<{ id: string }>;
+  documents: Array<{ id: string }>;
 };
 
 type OrderItem = {
@@ -161,6 +204,28 @@ function customerName(order: Order): string {
   );
 }
 
+function customerDetailName(customer: CustomerDetail): string {
+  return (
+    customer.company_name ||
+    [customer.first_name, customer.last_name].filter(Boolean).join(' ')
+  );
+}
+
+function customerAssetLabel(asset: CustomerAsset): string {
+  return (
+    [asset.manufacturer?.name, asset.model].filter(Boolean).join(' ').trim() ||
+    'Gerät ohne Bezeichnung'
+  );
+}
+
+function customerAssetGroupKey(asset: CustomerAsset): string {
+  return [asset.manufacturer?.name ?? '', asset.model ?? '']
+    .join(' ')
+    .trim()
+    .toLocaleLowerCase('de-DE')
+    .replace(/\s+/g, ' ');
+}
+
 function location(order: Order): string {
   return [
     order.service_location.street,
@@ -233,6 +298,11 @@ export default function OrdersPage() {
   const [saving, setSaving] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
+  const [selectedCustomerDetail, setSelectedCustomerDetail] =
+    useState<CustomerDetail | null>(null);
+  const [loadingCustomerId, setLoadingCustomerId] = useState('');
+  const [expandedCustomerAssetGroup, setExpandedCustomerAssetGroup] =
+    useState('');
 
   const selected = useMemo(
     () =>
@@ -240,6 +310,33 @@ export default function OrdersPage() {
       (detail?.id === selectedId ? detail : orders[0]),
     [detail, orders, selectedId],
   );
+
+  const customerAssetGroups = useMemo(() => {
+    const groups = new Map<
+      string,
+      { label: string; assets: CustomerAsset[] }
+    >();
+
+    for (const asset of selectedCustomerDetail?.assets ?? []) {
+      const key = customerAssetGroupKey(asset) || `asset-${asset.id}`;
+      const current = groups.get(key);
+      if (current) current.assets.push(asset);
+      else {
+        groups.set(key, {
+          label: customerAssetLabel(asset),
+          assets: [asset],
+        });
+      }
+    }
+
+    return Array.from(groups.entries())
+      .map(([key, group]) => ({ key, ...group }))
+      .sort(
+        (left, right) =>
+          right.assets.length - left.assets.length ||
+          left.label.localeCompare(right.label, 'de'),
+      );
+  }, [selectedCustomerDetail?.assets]);
 
   const load = useCallback(async () => {
     try {
@@ -310,10 +407,16 @@ export default function OrdersPage() {
   }, [selectedId]);
 
   useEffect(() => {
-    if (!showDetails && !cancelOpen) return;
+    if (!showDetails && !cancelOpen && !selectedCustomerDetail) return;
 
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
+
+      if (selectedCustomerDetail) {
+        setSelectedCustomerDetail(null);
+        setExpandedCustomerAssetGroup('');
+        return;
+      }
 
       if (cancelOpen) {
         setCancelOpen(false);
@@ -326,7 +429,22 @@ export default function OrdersPage() {
 
     window.addEventListener('keydown', closeOnEscape);
     return () => window.removeEventListener('keydown', closeOnEscape);
-  }, [cancelOpen, showDetails]);
+  }, [cancelOpen, selectedCustomerDetail, showDetails]);
+
+  async function openCustomer(customerId: string) {
+    setLoadingCustomerId(customerId);
+    try {
+      const result = await apiRequest<{ data: CustomerDetail }>(
+        `/customers/${customerId}`,
+      );
+      setExpandedCustomerAssetGroup('');
+      setSelectedCustomerDetail(result.data);
+    } catch {
+      toast.error('Kundendetails konnten nicht geladen werden.');
+    } finally {
+      setLoadingCustomerId('');
+    }
+  }
 
   async function assign() {
     if (!selected || !technicianId) {
@@ -506,7 +624,20 @@ export default function OrdersPage() {
                     {orderDate(order).toLocaleDateString('de-DE')}
                   </td>
                   <td className="px-4 py-4">
-                    <strong className="block">{customerName(order)}</strong>
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void openCustomer(order.customer.id);
+                      }}
+                      className={`block text-left font-semibold text-blue-600 hover:underline ${
+                        loadingCustomerId === order.customer.id
+                          ? 'opacity-60'
+                          : ''
+                      }`}
+                    >
+                      {customerName(order)}
+                    </button>
                     <span className="text-xs text-slate-500">
                       {location(order)}
                     </span>
@@ -658,11 +789,8 @@ export default function OrdersPage() {
               )}
               <div className="border-t text-sm">
                 <button
-                  onClick={() =>
-                    router.push(
-                      `/office/customers?customer=${selected.customer.id}`,
-                    )
-                  }
+                  onClick={() => void openCustomer(selected.customer.id)}
+                  disabled={loadingCustomerId === selected.customer.id}
                   className="flex w-full items-center justify-center gap-2 p-4"
                 >
                   <UserRound className="size-4" /> Kunde
@@ -765,9 +893,13 @@ export default function OrdersPage() {
                 <div className="text-xs font-semibold text-slate-500 uppercase">
                   Auftrag {detail.order_number}
                 </div>
-                <h2 className="mt-2 text-2xl font-bold">
+                <button
+                  type="button"
+                  onClick={() => void openCustomer(detail.customer.id)}
+                  className="mt-2 text-left text-2xl font-bold text-blue-700 hover:underline"
+                >
                   {customerName(detail)}
-                </h2>
+                </button>
               </div>
               <button
                 onClick={() => setShowDetails(false)}
@@ -939,6 +1071,252 @@ export default function OrdersPage() {
                   </div>
                 )}
               </div>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {selectedCustomerDetail && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/45 p-6">
+          <section className="max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
+            <header className="flex items-start justify-between border-b p-6">
+              <div>
+                <div className="text-xs font-semibold text-slate-500 uppercase">
+                  Kunde {selectedCustomerDetail.customer_number}
+                </div>
+                <h2 className="mt-2 text-2xl font-bold">
+                  {customerDetailName(selectedCustomerDetail)}
+                </h2>
+                {selectedCustomerDetail.legacy_customer_number && (
+                  <div className="mt-1 text-xs text-slate-500">
+                    Alte Kundennummer:{' '}
+                    {selectedCustomerDetail.legacy_customer_number}
+                  </div>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedCustomerDetail(null);
+                  setExpandedCustomerAssetGroup('');
+                }}
+                className="rounded-lg border px-4 py-2 text-sm"
+              >
+                Schließen
+              </button>
+            </header>
+
+            <div className="grid grid-cols-[1fr_1fr] gap-5 p-6">
+              <div className="space-y-5">
+                <section className="rounded-xl border p-5">
+                  <div className="text-xs font-semibold text-slate-500 uppercase">
+                    Kontaktdaten
+                  </div>
+                  <div className="mt-4 space-y-3 text-sm">
+                    <div className="flex items-center gap-3">
+                      <Phone className="size-4 text-slate-400" />
+                      {selectedCustomerDetail.primary_phone ? (
+                        <a
+                          href={`tel:${selectedCustomerDetail.primary_phone}`}
+                          className="font-medium text-blue-600"
+                        >
+                          {selectedCustomerDetail.primary_phone}
+                        </a>
+                      ) : (
+                        <span>—</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <Phone className="size-4 text-slate-400" />
+                      <span>
+                        {selectedCustomerDetail.secondary_phone || '—'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <Mail className="size-4 text-slate-400" />
+                      {selectedCustomerDetail.email ? (
+                        <a
+                          href={`mailto:${selectedCustomerDetail.email}`}
+                          className="font-medium text-blue-600"
+                        >
+                          {selectedCustomerDetail.email}
+                        </a>
+                      ) : (
+                        <span>—</span>
+                      )}
+                    </div>
+                  </div>
+                  {selectedCustomerDetail.notes && (
+                    <div className="mt-4 rounded-lg bg-slate-50 p-3 text-sm text-slate-600">
+                      {selectedCustomerDetail.notes}
+                    </div>
+                  )}
+                </section>
+
+                <section className="rounded-xl border">
+                  <div className="border-b px-5 py-4 font-bold">
+                    Serviceadressen (
+                    {selectedCustomerDetail.service_locations.length})
+                  </div>
+                  <div className="max-h-72 overflow-y-auto">
+                    {selectedCustomerDetail.service_locations.map(
+                      (serviceLocation, index) => (
+                        <div
+                          key={serviceLocation.id}
+                          className="border-b p-4 text-sm last:border-b-0"
+                        >
+                          <div className="flex items-center gap-2 font-semibold">
+                            <span className="flex size-6 items-center justify-center rounded-full bg-orange-100 text-xs text-[#ff5a0a]">
+                              {index + 1}
+                            </span>
+                            {serviceLocation.name ||
+                              (serviceLocation.is_primary
+                                ? 'Hauptadresse'
+                                : 'Serviceadresse')}
+                          </div>
+                          <div className="mt-2 pl-8">
+                            <div>
+                              {[
+                                serviceLocation.street,
+                                serviceLocation.house_number,
+                              ]
+                                .filter(Boolean)
+                                .join(' ')}
+                            </div>
+                            <div>
+                              {[
+                                serviceLocation.postal_code,
+                                serviceLocation.city,
+                              ]
+                                .filter(Boolean)
+                                .join(' ')}
+                            </div>
+                            {serviceLocation.contact_person && (
+                              <div className="mt-2 text-xs text-slate-500">
+                                Kontakt: {serviceLocation.contact_person}
+                              </div>
+                            )}
+                            {serviceLocation.access_notes && (
+                              <div className="text-xs text-slate-500">
+                                Zugang: {serviceLocation.access_notes}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ),
+                    )}
+                  </div>
+                </section>
+
+                <div className="grid grid-cols-3 gap-3">
+                  {[
+                    ['Aufträge', selectedCustomerDetail.service_orders.length],
+                    ['Geräte', selectedCustomerDetail.assets.length],
+                    ['Dokumente', selectedCustomerDetail.documents.length],
+                  ].map(([label, value]) => (
+                    <div
+                      key={label}
+                      className="rounded-xl border bg-slate-50 p-4 text-center"
+                    >
+                      <div className="text-xs text-slate-500">{label}</div>
+                      <strong className="mt-1 block text-xl">{value}</strong>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <section className="h-fit overflow-hidden rounded-xl border">
+                <div className="border-b px-5 py-4 font-bold">
+                  Geräte beim Kunden ({selectedCustomerDetail.assets.length})
+                </div>
+                <div className="max-h-[620px] overflow-y-auto">
+                  {customerAssetGroups.map((group) => {
+                    const expanded = expandedCustomerAssetGroup === group.key;
+
+                    return (
+                      <div key={group.key} className="border-b last:border-b-0">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setExpandedCustomerAssetGroup(
+                              expanded ? '' : group.key,
+                            )
+                          }
+                          className="flex w-full items-center gap-3 p-4 text-left hover:bg-slate-50"
+                        >
+                          <div className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-slate-100">
+                            <PackageOpen className="size-6 text-slate-500" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm font-semibold">
+                              {group.label}
+                            </div>
+                            <div className="text-xs text-slate-500">
+                              {
+                                group.assets.filter(
+                                  (asset) => asset.status === 'active',
+                                ).length
+                              }{' '}
+                              aktiv
+                            </div>
+                          </div>
+                          <span className="rounded-full bg-[#ff5a0a] px-2.5 py-1 text-xs font-bold text-white">
+                            × {group.assets.length}
+                          </span>
+                          <ChevronRight
+                            className={`size-4 text-slate-400 transition-transform ${
+                              expanded ? 'rotate-90' : ''
+                            }`}
+                          />
+                        </button>
+                        {expanded && (
+                          <div className="border-t bg-slate-50/70">
+                            {group.assets.map((asset, index) => (
+                              <div
+                                key={asset.id}
+                                className="flex items-center gap-3 border-b border-slate-200 px-4 py-3 text-xs last:border-b-0"
+                              >
+                                <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-white font-semibold text-slate-500">
+                                  {index + 1}
+                                </span>
+                                <div className="min-w-0 flex-1">
+                                  <div className="font-semibold">
+                                    SN: {asset.serial_number || '—'} · FD:{' '}
+                                    {asset.production_number || '—'}
+                                  </div>
+                                  <div className="mt-0.5 text-slate-500">
+                                    {asset.purchase_date
+                                      ? new Date(
+                                          asset.purchase_date,
+                                        ).toLocaleDateString('de-DE')
+                                      : 'Datum unbekannt'}
+                                  </div>
+                                </div>
+                                <span
+                                  className={`rounded px-2 py-1 ${
+                                    asset.status === 'active'
+                                      ? 'bg-emerald-100 text-emerald-700'
+                                      : 'bg-slate-200 text-slate-600'
+                                  }`}
+                                >
+                                  {asset.status === 'active'
+                                    ? 'Aktiv'
+                                    : 'Inaktiv'}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {customerAssetGroups.length === 0 && (
+                    <div className="p-10 text-center text-sm text-slate-500">
+                      Keine Geräte erfasst.
+                    </div>
+                  )}
+                </div>
+              </section>
             </div>
           </section>
         </div>
