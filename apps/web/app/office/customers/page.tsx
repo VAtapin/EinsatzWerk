@@ -71,6 +71,7 @@ type ServiceOrder = {
   preferred_date: string | null;
   gross_total: number | string;
   created_at: string;
+  service_location: Location | null;
   asset: {
     id: string;
     model: string | null;
@@ -78,9 +79,14 @@ type ServiceOrder = {
   } | null;
   items: Array<{
     id: string;
+    article_number: string | null;
+    code: string | null;
     classification: string;
     description: string | null;
     additional_text: string | null;
+    quantity: string | null;
+    gross_unit_price: string | null;
+    serial_number: string | null;
     assets: Array<{
       id: string;
       model: string | null;
@@ -182,6 +188,21 @@ const orderStatus: Record<string, string> = {
   cancelled: 'Storniert',
 };
 
+const classificationLabel: Record<string, string> = {
+  device: 'Gerät',
+  spare_part: 'Ersatzteil',
+  labor: 'Arbeitsleistung',
+  delivery: 'Lieferung',
+  disposal: 'Altgerät',
+  inspection: 'Prüfung',
+  warranty: 'Garantie',
+  discount: 'Rabatt / Gutschrift',
+  furniture: 'Möbel',
+  accessory: 'Zubehör',
+  structural: 'Gliederung',
+  other: 'Unklar',
+};
+
 export default function CustomersPage() {
   const router = useRouter();
   const [customers, setCustomers] = useState<CustomerListItem[]>([]);
@@ -197,6 +218,9 @@ export default function CustomersPage() {
   const [saving, setSaving] = useState(false);
   const [uploadingDocument, setUploadingDocument] = useState(false);
   const [expandedAssetGroup, setExpandedAssetGroup] = useState('');
+  const [selectedOrderDetail, setSelectedOrderDetail] =
+    useState<ServiceOrder | null>(null);
+  const [loadingOrderId, setLoadingOrderId] = useState('');
   const [customerForm, setCustomerForm] = useState({
     first_name: '',
     last_name: '',
@@ -286,6 +310,17 @@ export default function CustomersPage() {
   }, [selectedId]);
 
   useEffect(() => {
+    if (!selectedOrderDetail) return;
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSelectedOrderDetail(null);
+    };
+
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [selectedOrderDetail]);
+
+  useEffect(() => {
     if (!detail || !requestedView) return;
     document
       .getElementById(
@@ -331,6 +366,20 @@ export default function CustomersPage() {
       `/customers/${selectedId}`,
     );
     setDetail(result.data);
+  }
+
+  async function openOrderDetail(orderId: string) {
+    setLoadingOrderId(orderId);
+    try {
+      const result = await apiRequest<{ data: ServiceOrder }>(
+        `/service-orders/${orderId}`,
+      );
+      setSelectedOrderDetail(result.data);
+    } catch {
+      toast.error('Auftragsdetails konnten nicht geladen werden.');
+    } finally {
+      setLoadingOrderId('');
+    }
   }
 
   function openCustomerEditor() {
@@ -688,12 +737,10 @@ export default function CustomersPage() {
                       {detail.service_orders.map((order) => (
                         <tr
                           key={order.id}
-                          onClick={() =>
-                            router.push(
-                              `/office/orders?order=${order.id}&open=1`,
-                            )
-                          }
-                          className="cursor-pointer border-t hover:bg-orange-50/70"
+                          onClick={() => void openOrderDetail(order.id)}
+                          className={`cursor-pointer border-t hover:bg-orange-50/70 ${
+                            loadingOrderId === order.id ? 'opacity-60' : ''
+                          }`}
                         >
                           <td className="px-4 py-3 font-semibold text-blue-600">
                             {order.order_number}
@@ -893,6 +940,153 @@ export default function CustomersPage() {
           </section>
         </aside>
       </div>
+
+      {selectedOrderDetail && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/45 p-6">
+          <section className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
+            <header className="flex items-start justify-between border-b p-6">
+              <div>
+                <div className="text-xs font-semibold text-slate-500 uppercase">
+                  Auftrag {selectedOrderDetail.order_number}
+                </div>
+                <h2 className="mt-2 text-2xl font-bold">
+                  {detail ? displayName(detail) : 'Kunde'}
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedOrderDetail(null)}
+                className="rounded-lg border px-4 py-2 text-sm"
+              >
+                Schließen
+              </button>
+            </header>
+
+            <div className="grid grid-cols-2 gap-5 p-6 text-sm">
+              <div className="rounded-xl border p-4">
+                <div className="text-xs font-semibold text-slate-500 uppercase">
+                  Auftragsübersicht
+                </div>
+                <dl className="mt-3 grid grid-cols-2 gap-3">
+                  <div>
+                    <dt className="text-xs text-slate-500">Datum</dt>
+                    <dd className="font-semibold">
+                      {serviceOrderDate(selectedOrderDetail).toLocaleDateString(
+                        'de-DE',
+                      )}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-slate-500">Positionen</dt>
+                    <dd className="font-semibold">
+                      {selectedOrderDetail.items.length}
+                    </dd>
+                  </div>
+                  <div className="col-span-2">
+                    <dt className="text-xs text-slate-500">Gesamt brutto</dt>
+                    <dd className="text-lg font-bold">
+                      {formatMoney(selectedOrderDetail.gross_total)}
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+
+              <div className="rounded-xl border p-4">
+                <div className="text-xs font-semibold text-slate-500 uppercase">
+                  Status
+                </div>
+                <div className="mt-2 font-semibold">
+                  {orderStatus[selectedOrderDetail.status] ||
+                    selectedOrderDetail.status}
+                </div>
+                <div className="mt-4 text-xs font-semibold text-slate-500 uppercase">
+                  Adresse
+                </div>
+                <p className="mt-2">
+                  {selectedOrderDetail.service_location
+                    ? address(selectedOrderDetail.service_location)
+                    : 'Keine Adresse'}
+                </p>
+              </div>
+
+              {selectedOrderDetail.source !== 'legacy' &&
+                selectedOrderDetail.fault_description && (
+                  <div className="col-span-2 rounded-xl border p-4">
+                    <div className="text-xs font-semibold text-slate-500 uppercase">
+                      Problem
+                    </div>
+                    <p className="mt-2 whitespace-pre-wrap">
+                      {selectedOrderDetail.fault_description}
+                    </p>
+                  </div>
+                )}
+
+              <div className="col-span-2 overflow-hidden rounded-xl border">
+                <div className="border-b bg-slate-50 px-4 py-3 text-xs font-semibold text-slate-500 uppercase">
+                  Positionen ({selectedOrderDetail.items.length})
+                </div>
+                <table className="w-full text-sm">
+                  <thead className="text-left text-xs text-slate-500">
+                    <tr>
+                      <th className="px-4 py-3">Artikel / Code</th>
+                      <th className="px-4 py-3">Bezeichnung</th>
+                      <th className="px-4 py-3">Typ</th>
+                      <th className="px-4 py-3 text-right">Menge</th>
+                      <th className="px-4 py-3 text-right">Brutto</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedOrderDetail.items.map((item) => (
+                      <tr key={item.id} className="border-t align-top">
+                        <td className="px-4 py-3">
+                          <div className="font-medium">
+                            {item.article_number || '—'}
+                          </div>
+                          <div className="text-xs text-slate-500">
+                            {item.code || 'ohne Code'}
+                          </div>
+                        </td>
+                        <td className="max-w-md px-4 py-3">
+                          <div className="font-medium">
+                            {item.description || '—'}
+                          </div>
+                          {item.additional_text && (
+                            <div className="mt-1 whitespace-pre-wrap text-xs text-slate-500">
+                              {item.additional_text}
+                            </div>
+                          )}
+                          {item.serial_number && (
+                            <div className="mt-1 text-xs">
+                              SN: {item.serial_number}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="rounded bg-slate-100 px-2 py-1 text-xs">
+                            {classificationLabel[item.classification] ||
+                              item.classification}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          {item.quantity || '—'}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          {formatMoney(item.gross_unit_price)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {selectedOrderDetail.items.length === 0 && (
+                  <div className="p-8 text-center text-slate-500">
+                    Keine Positionen vorhanden.
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
 
       {editor === 'customer' && (
         <EditorModal title="Kunde bearbeiten" onClose={() => setEditor(null)}>
