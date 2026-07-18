@@ -2,10 +2,12 @@
 
 namespace Tests\Feature;
 
+use App\Models\Asset;
 use App\Models\Customer;
 use App\Models\Organization;
 use App\Models\ServiceLocation;
 use App\Models\ServiceOrder;
+use App\Models\ServiceOrderItem;
 use App\Models\User;
 use App\Models\Visit;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -115,6 +117,78 @@ class WorkspaceApiTest extends TestCase
             'locale' => 'de',
             'password' => null,
         ])->assertOk()->assertJsonPath('data.phone', '0170 123456');
+    }
+
+    public function test_legacy_order_items_are_searchable_and_expose_derived_devices(): void
+    {
+        [$organization, $dispatcher, , $customer, $location] = $this->workspace();
+        $order = ServiceOrder::query()->create([
+            'organization_id' => $organization->id,
+            'order_number' => 'L3821',
+            'legacy_order_number' => 'L3821',
+            'customer_id' => $customer->id,
+            'service_location_id' => $location->id,
+            'source' => 'legacy',
+            'status' => 'completed',
+            'priority' => 'normal',
+            'fault_description' => 'Historischer Auftrag',
+            'closed_at' => '2017-04-28 00:00:00',
+        ]);
+        $item = ServiceOrderItem::query()->create([
+            'organization_id' => $organization->id,
+            'service_order_id' => $order->id,
+            'customer_id' => $customer->id,
+            'source_row' => 2,
+            'legacy_number' => 'L3821',
+            'article_number' => '99041',
+            'code' => 'EK 45546',
+            'line_date' => '2017-04-28',
+            'description' => 'PKM KG 220.4 A++',
+            'additional_text' => 'Kühl-Gefrierkombination',
+            'quantity' => 1,
+            'gross_unit_price' => 499,
+            'legacy_customer_number' => 'K-10041',
+            'classification' => 'device',
+            'classification_confidence' => 'high',
+            'classification_reason' => 'Geräteart erkannt',
+            'device_type' => 'refrigeration',
+            'legacy_data' => [
+                'Nummer' => 'L3821',
+                'Kundennummer' => 'K-10041',
+                'Zusatztext' => 'Kühl-Gefrierkombination',
+            ],
+        ]);
+        $asset = Asset::query()->create([
+            'organization_id' => $organization->id,
+            'customer_id' => $customer->id,
+            'service_location_id' => $location->id,
+            'source_order_item_id' => $item->id,
+            'model' => 'PKM KG 220.4 A++',
+            'purchase_date' => '2017-04-28',
+            'status' => 'active',
+        ]);
+
+        Sanctum::actingAs($dispatcher, ['office']);
+
+        $this->getJson('/api/v1/service-orders?q=Kühl-Gefrierkombination')
+            ->assertOk()
+            ->assertJsonPath('data.0.id', $order->id)
+            ->assertJsonPath('data.0.items_count', 1);
+        $this->getJson("/api/v1/service-orders/{$order->id}")
+            ->assertOk()
+            ->assertJsonPath('data.items.0.id', $item->id)
+            ->assertJsonPath('data.items.0.assets.0.id', $asset->id);
+        $this->getJson('/api/v1/assets?q=L3821')
+            ->assertOk()
+            ->assertJsonPath('data.0.id', $asset->id)
+            ->assertJsonPath(
+                'data.0.source_order_item.service_order.order_number',
+                'L3821',
+            );
+        $this->getJson('/api/v1/documents')
+            ->assertOk()
+            ->assertJsonPath('data.customer', [])
+            ->assertJsonPath('data.service', []);
     }
 
     private function workspace(): array

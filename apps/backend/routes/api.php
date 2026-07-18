@@ -54,6 +54,7 @@ Route::prefix('v1')->group(function (): void {
             Route::post('service-areas/{serviceArea}/postal-codes', [OfficeWorkspaceController::class, 'storePostalCode']);
             Route::delete('service-areas/{serviceArea}/postal-codes/{postalCode}', [OfficeWorkspaceController::class, 'deletePostalCode']);
             Route::get('documents', [OfficeWorkspaceController::class, 'documents']);
+            Route::get('documents/customer/{customerDocument}', [OfficeWorkspaceController::class, 'downloadCustomerDocument']);
             Route::get('documents/service/{visitDocument}', [OfficeWorkspaceController::class, 'downloadServiceDocument']);
             Route::get('settings', [OfficeWorkspaceController::class, 'settings']);
             Route::patch('settings', [OfficeWorkspaceController::class, 'updateSettings']);

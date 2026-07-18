@@ -64,15 +64,20 @@ class CustomerController extends Controller
                     ->orderByDesc('is_primary')
                     ->oldest(),
                 'assets' => fn ($builder) => $builder
-                    ->with(['manufacturer:id,name', 'serviceLocation'])
+                    ->with([
+                        'manufacturer:id,name',
+                        'serviceLocation',
+                        'sourceOrderItem.serviceOrder:id,order_number',
+                    ])
                     ->orderByRaw("CASE status WHEN 'active' THEN 1 ELSE 2 END")
                     ->latest(),
                 'serviceOrders' => fn ($builder) => $builder
-                    ->with(['asset:id,model,serial_number', 'serviceLocation'])
+                    ->with([
+                        'asset:id,model,serial_number',
+                        'serviceLocation',
+                        'items.assets:id,source_order_item_id,model,serial_number',
+                    ])
                     ->latest()
-                    ->limit(10),
-                'commercialDocuments' => fn ($builder) => $builder
-                    ->latest('document_date')
                     ->limit(10),
                 'documents' => fn ($builder) => $builder->latest()->limit(25),
             ])

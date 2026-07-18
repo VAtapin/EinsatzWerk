@@ -22,6 +22,7 @@ class ServiceOrderController extends Controller
             'q' => ['nullable', 'string', 'max:200'],
             'status' => ['nullable', 'string', 'max:64'],
             'priority' => ['nullable', 'string', 'max:32'],
+            'source' => ['nullable', 'string', 'in:phone,manual,technician,legacy'],
             'per_page' => ['nullable', 'integer', 'min:10', 'max:100'],
         ]);
         $organizationId = $request->user()->organization_id;
@@ -31,6 +32,7 @@ class ServiceOrderController extends Controller
             ->where('organization_id', $organizationId)
             ->when($validated['status'] ?? null, fn ($builder, $status) => $builder->where('status', $status))
             ->when($validated['priority'] ?? null, fn ($builder, $priority) => $builder->where('priority', $priority))
+            ->when($validated['source'] ?? null, fn ($builder, $source) => $builder->where('source', $source))
             ->when($query !== '', function ($builder) use ($query): void {
                 $builder->where(function ($builder) use ($query): void {
                     $builder
@@ -47,6 +49,14 @@ class ServiceOrderController extends Controller
                                 ->whereLike('street', "%{$query}%")
                                 ->orWhereLike('postal_code', "%{$query}%")
                                 ->orWhereLike('city', "%{$query}%");
+                        })
+                        ->orWhereHas('items', function ($builder) use ($query): void {
+                            $builder
+                                ->whereLike('article_number', "%{$query}%")
+                                ->orWhereLike('code', "%{$query}%")
+                                ->orWhereLike('description', "%{$query}%")
+                                ->orWhereLike('additional_text', "%{$query}%")
+                                ->orWhereLike('serial_number', "%{$query}%");
                         });
                 });
             })
@@ -58,6 +68,7 @@ class ServiceOrderController extends Controller
                     ->with('technician')
                     ->orderByDesc('visit_number'),
             ])
+            ->withCount('items')
             ->latest()
             ->paginate($validated['per_page'] ?? 25);
 
@@ -73,6 +84,7 @@ class ServiceOrderController extends Controller
                 'asset.manufacturer',
                 'appointmentConstraints',
                 'visits.technician',
+                'items.assets:id,source_order_item_id,model,serial_number,status',
             ]),
         ]);
     }

@@ -60,6 +60,10 @@ type Asset = {
   installation_date?: string | null;
   warranty_until?: string | null;
   notes?: string | null;
+  source_order_item?: {
+    id: string;
+    service_order: { id: string; order_number: string };
+  } | null;
 };
 
 type ServiceOrder = {
@@ -67,16 +71,16 @@ type ServiceOrder = {
   order_number: string;
   fault_description: string;
   status: string;
+  source: string;
   created_at: string;
   asset: { id: string; model: string | null; serial_number: string | null } | null;
-};
-
-type CommercialDocument = {
-  id: string;
-  document_number: string;
-  legacy_document_number: string;
-  type: string;
-  document_date: string | null;
+  items: Array<{
+    id: string;
+    classification: string;
+    description: string | null;
+    additional_text: string | null;
+    assets: Array<{ id: string; model: string | null; serial_number: string | null }>;
+  }>;
 };
 
 type CustomerDocument = {
@@ -95,7 +99,6 @@ type CustomerDetail = CustomerListItem & {
   created_at: string;
   assets: Asset[];
   service_orders: ServiceOrder[];
-  commercial_documents: CommercialDocument[];
   documents: CustomerDocument[];
 };
 
@@ -581,8 +584,18 @@ export default function CustomersPage() {
                           {new Date(order.created_at).toLocaleDateString('de-DE')}
                         </td>
                         <td className="max-w-64 px-4 py-3">
-                          <div className="font-medium">{order.asset?.model || 'Ohne Gerät'}</div>
-                          <div className="truncate text-xs text-slate-500">{order.fault_description}</div>
+                          <div className="font-medium">
+                            {order.asset?.model ||
+                              order.items.find(
+                                (item) => item.classification === 'device',
+                              )?.description ||
+                              `${order.items.length} Positionen`}
+                          </div>
+                          <div className="truncate text-xs text-slate-500">
+                            {order.source === 'legacy'
+                              ? 'Historischer Auftrag'
+                              : order.fault_description}
+                          </div>
                         </td>
                         <td className="px-4 py-3">
                           <span className="rounded bg-slate-100 px-2 py-1 text-xs">
@@ -635,6 +648,11 @@ export default function CustomersPage() {
                   </div>
                   <div className="text-xs text-slate-500">SN: {asset.serial_number || '—'}</div>
                   <div className="text-xs text-slate-500">FD: {asset.production_number || '—'}</div>
+                  {asset.source_order_item?.service_order && (
+                    <div className="text-xs text-blue-600">
+                      Auftrag {asset.source_order_item.service_order.order_number}
+                    </div>
+                  )}
                 </div>
                 <span className={`rounded px-2 py-1 text-xs ${
                   asset.status === 'active'
@@ -690,21 +708,7 @@ export default function CustomersPage() {
                 </div>
               </button>
             ))}
-            {detail?.commercial_documents.map((document) => (
-              <div key={document.id} className="flex items-center gap-3 border-b p-4 text-sm">
-                <FileText className="size-5 shrink-0 text-red-500" />
-                <div className="min-w-0 flex-1">
-                  <div className="truncate font-medium">{document.document_number}</div>
-                  <div className="text-xs text-slate-500">
-                    {document.type} ·{' '}
-                    {document.document_date
-                      ? new Date(document.document_date).toLocaleDateString('de-DE')
-                      : 'ohne Datum'}
-                  </div>
-                </div>
-              </div>
-            ))}
-            {!detail?.commercial_documents.length && !detail?.documents.length && (
+            {!detail?.documents.length && (
               <div className="p-8 text-center text-sm text-slate-500">
                 Keine Dokumente vorhanden.
               </div>

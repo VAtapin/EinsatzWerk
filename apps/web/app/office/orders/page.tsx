@@ -30,6 +30,8 @@ type Order = {
   order_number: string;
   priority: string;
   status: string;
+  source: string;
+  items_count: number;
   fault_description: string;
   fault_category: string | null;
   customer_message: string | null;
@@ -66,6 +68,28 @@ type OrderDetail = Order & {
     starts_at: string;
     ends_at: string | null;
     is_hard: boolean;
+  }>;
+  items: Array<{
+    id: string;
+    legacy_art: string | null;
+    article_number: string | null;
+    code: string | null;
+    line_date: string | null;
+    description: string | null;
+    additional_text: string | null;
+    quantity: string | null;
+    net_unit_price: string | null;
+    gross_unit_price: string | null;
+    serial_number: string | null;
+    classification: string;
+    classification_confidence: string;
+    device_type: string | null;
+    assets: Array<{
+      id: string;
+      model: string | null;
+      serial_number: string | null;
+      status: string;
+    }>;
   }>;
 };
 
@@ -110,6 +134,21 @@ const priorityStyle: Record<string, string> = {
   urgent: 'bg-red-600 text-white',
 };
 
+const classificationLabel: Record<string, string> = {
+  device: 'Gerät',
+  spare_part: 'Ersatzteil',
+  labor: 'Arbeitsleistung',
+  delivery: 'Lieferung',
+  disposal: 'Altgerät',
+  inspection: 'Prüfung',
+  warranty: 'Garantie',
+  discount: 'Rabatt / Gutschrift',
+  furniture: 'Möbel',
+  accessory: 'Zubehör',
+  structural: 'Gliederung',
+  other: 'Unklar',
+};
+
 function customerName(order: Order): string {
   return (
     order.customer.company_name ||
@@ -142,6 +181,7 @@ export default function OrdersPage() {
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('');
   const [priority, setPriority] = useState('');
+  const [source, setSource] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [selectedId, setSelectedId] = useState('');
   const [detail, setDetail] = useState<OrderDetail | null>(null);
@@ -170,6 +210,7 @@ export default function OrdersPage() {
       if (query.trim()) params.set('q', query.trim());
       if (status) params.set('status', status);
       if (priority) params.set('priority', priority);
+      if (source) params.set('source', source);
       const result = await apiRequest<{ data: Order[] }>(
         `/service-orders?${params.toString()}`,
       );
@@ -194,7 +235,7 @@ export default function OrdersPage() {
     } finally {
       setLoading(false);
     }
-  }, [priority, query, router, status]);
+  }, [priority, query, router, source, status]);
 
   useEffect(() => {
     if (!getAccessToken()) {
@@ -342,9 +383,24 @@ export default function OrdersPage() {
               <option value="urgent">Dringend</option>
             </select>
           </label>
+          <label className="text-xs font-medium">
+            Herkunft
+            <select
+              value={source}
+              onChange={(event) => setSource(event.target.value)}
+              className="mt-1 block h-10 min-w-52 rounded-lg border bg-white px-3 text-sm"
+            >
+              <option value="">Alle Aufträge</option>
+              <option value="legacy">Historische Aufträge</option>
+              <option value="phone">Telefonannahme</option>
+              <option value="manual">Manuell</option>
+              <option value="technician">Techniker</option>
+            </select>
+          </label>
           <button
             onClick={() => {
               setPriority('');
+              setSource('');
               setQuery('');
             }}
             className="h-10 rounded-lg border px-4 text-sm"
@@ -391,9 +447,20 @@ export default function OrdersPage() {
                       </span>
                     </td>
                     <td className="max-w-64 px-4 py-4">
-                      <span className="line-clamp-2">
-                        {order.fault_description}
-                      </span>
+                      {order.source === 'legacy' ? (
+                        <>
+                          <span className="line-clamp-2 font-medium">
+                            Historischer Auftrag
+                          </span>
+                          <span className="text-xs text-slate-500">
+                            {order.items_count} Positionen
+                          </span>
+                        </>
+                      ) : (
+                        <span className="line-clamp-2">
+                          {order.fault_description}
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-4">
                       {visit ? (
@@ -459,9 +526,15 @@ export default function OrdersPage() {
                   <MapPin className="mt-0.5 size-4 shrink-0" />
                   {location(selected)}
                 </p>
-                <p className="mt-4 text-sm">{selected.fault_description}</p>
+                <p className="mt-4 text-sm">
+                  {selected.source === 'legacy'
+                    ? `${selected.items_count} historische Positionen`
+                    : selected.fault_description}
+                </p>
               </div>
-              <div className="space-y-4 p-5">
+              {selected.source !== 'legacy' &&
+              !['completed', 'cancelled'].includes(selected.status) ? (
+                <div className="space-y-4 p-5">
                 <div className="flex items-center gap-2 text-sm font-semibold">
                   <CalendarDays className="size-4 text-[#ff5a0a]" />
                   Einsatz planen
@@ -504,15 +577,21 @@ export default function OrdersPage() {
                   <Check className="size-5" />
                   {saving ? 'Speichern…' : 'Techniker zuweisen'}
                 </button>
-                {!['completed', 'cancelled'].includes(selected.status) && (
                   <button
                     onClick={() => setCancelOpen(true)}
                     className="flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-red-200 font-semibold text-red-600 hover:bg-red-50"
                   >
                     <Ban className="size-4" /> Auftrag stornieren
                   </button>
-                )}
-              </div>
+                </div>
+              ) : (
+                <div className="p-5 text-sm text-slate-600">
+                  <div className="rounded-lg bg-emerald-50 p-4">
+                    Dieser Auftrag ist abgeschlossen und dient als
+                    Kundenhistorie.
+                  </div>
+                </div>
+              )}
               <div className="grid grid-cols-2 border-t text-sm">
                 <button
                   onClick={() =>
@@ -697,6 +776,84 @@ export default function OrdersPage() {
                   ))
                 ) : (
                   <p className="mt-2 text-slate-500">Kein Terminwunsch.</p>
+                )}
+              </div>
+              <div className="col-span-2 overflow-hidden rounded-xl border">
+                <div className="border-b bg-slate-50 px-4 py-3 text-xs font-semibold text-slate-500 uppercase">
+                  Positionen ({detail.items.length})
+                </div>
+                <table className="w-full text-sm">
+                  <thead className="text-left text-xs text-slate-500">
+                    <tr>
+                      <th className="px-4 py-3">Artikel / Code</th>
+                      <th className="px-4 py-3">Bezeichnung</th>
+                      <th className="px-4 py-3">Typ</th>
+                      <th className="px-4 py-3 text-right">Menge</th>
+                      <th className="px-4 py-3 text-right">Brutto</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {detail.items.map((item) => (
+                      <tr key={item.id} className="border-t align-top">
+                        <td className="px-4 py-3">
+                          <div className="font-medium">
+                            {item.article_number || '—'}
+                          </div>
+                          <div className="text-xs text-slate-500">
+                            {item.code || 'ohne Code'}
+                          </div>
+                        </td>
+                        <td className="max-w-md px-4 py-3">
+                          <div className="font-medium">
+                            {item.description || '—'}
+                          </div>
+                          {item.additional_text && (
+                            <div className="mt-1 whitespace-pre-wrap text-xs text-slate-500">
+                              {item.additional_text}
+                            </div>
+                          )}
+                          {item.serial_number && (
+                            <div className="mt-1 text-xs">
+                              SN: {item.serial_number}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span
+                            className={`rounded px-2 py-1 text-xs ${
+                              item.classification === 'device'
+                                ? 'bg-blue-100 text-blue-700'
+                                : item.classification === 'other'
+                                  ? 'bg-amber-100 text-amber-700'
+                                  : 'bg-slate-100 text-slate-700'
+                            }`}
+                          >
+                            {classificationLabel[item.classification] ||
+                              item.classification}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          {item.quantity || '—'}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          {item.gross_unit_price
+                            ? `${Number(item.gross_unit_price).toLocaleString(
+                                'de-DE',
+                                {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                },
+                              )} €`
+                            : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {detail.items.length === 0 && (
+                  <div className="p-8 text-center text-slate-500">
+                    Keine Positionen vorhanden.
+                  </div>
                 )}
               </div>
             </div>

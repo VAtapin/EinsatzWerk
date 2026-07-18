@@ -232,6 +232,8 @@ type AssetItem = {
   serial_number: string | null;
   production_number: string | null;
   legacy_article_id: string | null;
+  purchase_date: string | null;
+  notes: string | null;
   status: string;
   customer: {
     id: string;
@@ -246,6 +248,12 @@ type AssetItem = {
     city: string | null;
   } | null;
   manufacturer: { name: string } | null;
+  source_order_item: {
+    id: string;
+    code: string | null;
+    additional_text: string | null;
+    service_order: { id: string; order_number: string };
+  } | null;
 };
 
 export function AssetsPage() {
@@ -312,6 +320,7 @@ export function AssetsPage() {
               <th className="px-4 py-3">Gerät</th>
               <th className="px-4 py-3">SN / FD</th>
               <th className="px-4 py-3">Kunde</th>
+              <th className="px-4 py-3">Auftrag / Kauf</th>
               <th className="px-4 py-3">Standort</th>
               <th className="px-4 py-3">Status</th>
             </tr>
@@ -325,10 +334,17 @@ export function AssetsPage() {
                 }
                 className="cursor-pointer border-t hover:bg-slate-50"
               >
-                <td className="px-4 py-4 font-semibold">
-                  {[asset.manufacturer?.name, asset.model]
-                    .filter(Boolean)
-                    .join(' ') || 'Gerät'}
+                <td className="max-w-72 px-4 py-4">
+                  <div className="font-semibold">
+                    {[asset.manufacturer?.name, asset.model]
+                      .filter(Boolean)
+                      .join(' ') || 'Gerät'}
+                  </div>
+                  {(asset.source_order_item?.additional_text || asset.notes) && (
+                    <div className="mt-1 line-clamp-2 text-xs text-slate-500">
+                      {asset.source_order_item?.additional_text || asset.notes}
+                    </div>
+                  )}
                 </td>
                 <td className="px-4 py-4 text-slate-600">
                   <div>SN: {asset.serial_number || '—'}</div>
@@ -341,6 +357,16 @@ export function AssetsPage() {
                     [asset.customer.first_name, asset.customer.last_name]
                       .filter(Boolean)
                       .join(' ')}
+                </td>
+                <td className="px-4 py-4">
+                  <div className="font-medium text-blue-600">
+                    {asset.source_order_item?.service_order.order_number || '—'}
+                  </div>
+                  <div className="text-xs text-slate-500">
+                    {asset.purchase_date
+                      ? new Date(asset.purchase_date).toLocaleDateString('de-DE')
+                      : 'ohne Datum'}
+                  </div>
                 </td>
                 <td className="px-4 py-4 text-slate-500">
                   {asset.service_location
@@ -997,12 +1023,13 @@ export function ServiceAreasPage() {
 }
 
 type DocumentsData = {
-  commercial: Array<{
+  customer: Array<{
     id: string;
-    document_number: string;
+    name: string;
     type: string;
-    document_date: string | null;
-    lines_count: number;
+    mime_type: string | null;
+    size: number | null;
+    created_at: string;
     customer: {
       first_name: string | null;
       last_name: string;
@@ -1030,10 +1057,10 @@ type DocumentsData = {
 export function DocumentsPage() {
   useOfficeAccess();
   const [data, setData] = useState<DocumentsData>({
-    commercial: [],
+    customer: [],
     service: [],
   });
-  const [tab, setTab] = useState<'commercial' | 'service'>('commercial');
+  const [tab, setTab] = useState<'customer' | 'service'>('customer');
   useEffect(() => {
     apiRequest<{ data: DocumentsData }>('/documents')
       .then((result) => setData(result.data))
@@ -1047,14 +1074,14 @@ export function DocumentsPage() {
       />
       <div className="mb-4 flex gap-6 border-b">
         <button
-          onClick={() => setTab('commercial')}
+          onClick={() => setTab('customer')}
           className={`border-b-2 pb-3 text-sm ${
-            tab === 'commercial'
+            tab === 'customer'
               ? 'border-[#ff5a0a] font-semibold text-[#ff5a0a]'
               : 'border-transparent text-slate-500'
           }`}
         >
-          Kundendokumente ({data.commercial.length})
+          Kundendokumente ({data.customer.length})
         </button>
         <button
           onClick={() => setTab('service')}
@@ -1068,24 +1095,20 @@ export function DocumentsPage() {
         </button>
       </div>
       <section className="overflow-hidden rounded-xl border bg-white">
-        {tab === 'commercial' ? (
+        {tab === 'customer' ? (
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-left text-xs text-slate-500">
               <tr>
+                <th className="px-4 py-3">Kunde</th>
                 <th className="px-4 py-3">Dokument</th>
                 <th className="px-4 py-3">Typ</th>
-                <th className="px-4 py-3">Kunde</th>
                 <th className="px-4 py-3">Datum</th>
-                <th className="px-4 py-3">Positionen</th>
+                <th className="w-14 px-4 py-3" />
               </tr>
             </thead>
             <tbody>
-              {data.commercial.map((document) => (
+              {data.customer.map((document) => (
                 <tr key={document.id} className="border-t">
-                  <td className="px-4 py-4 font-semibold text-blue-600">
-                    {document.document_number}
-                  </td>
-                  <td className="px-4 py-4">{document.type}</td>
                   <td className="px-4 py-4">
                     {document.customer?.company_name ||
                       [
@@ -1096,14 +1119,28 @@ export function DocumentsPage() {
                         .join(' ') ||
                       '—'}
                   </td>
-                  <td className="px-4 py-4">
-                    {document.document_date
-                      ? new Date(document.document_date).toLocaleDateString(
-                          'de-DE',
-                        )
-                      : '—'}
+                  <td className="px-4 py-4 font-semibold">
+                    {document.name}
                   </td>
-                  <td className="px-4 py-4">{document.lines_count}</td>
+                  <td className="px-4 py-4">{document.type}</td>
+                  <td className="px-4 py-4">
+                    {new Date(document.created_at).toLocaleDateString('de-DE')}
+                  </td>
+                  <td className="px-4 py-4">
+                    <button
+                      onClick={() =>
+                        apiDownload(
+                          `/documents/customer/${document.id}`,
+                          document.name,
+                        ).catch(() =>
+                          toast.error('Dokument konnte nicht geladen werden.'),
+                        )
+                      }
+                      className="rounded-lg border p-2 hover:bg-slate-50"
+                    >
+                      <FileDown className="size-4" />
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -1138,6 +1175,12 @@ export function DocumentsPage() {
                 <FileDown className="size-5 text-slate-400" />
               </button>
             ))}
+          </div>
+        )}
+        {((tab === 'customer' && data.customer.length === 0) ||
+          (tab === 'service' && data.service.length === 0)) && (
+          <div className="p-14 text-center text-sm text-slate-500">
+            Noch keine Dokumente vorhanden.
           </div>
         )}
       </section>

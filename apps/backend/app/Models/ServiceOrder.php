@@ -45,4 +45,9 @@ class ServiceOrder extends Model
     {
         return $this->hasMany(AppointmentConstraint::class);
     }
+
+    public function items(): HasMany
+    {
+        return $this->hasMany(ServiceOrderItem::class)->orderBy('source_row');
+    }
 }

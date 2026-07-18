@@ -75,6 +75,20 @@ The directory must contain:
 Source rows and identifiers are retained. Re-running an unchanged source is
 idempotent. Legacy source files must never be committed to Git.
 
+`lsArtikel.txt` is imported as historical completed orders:
+
+- `Nummer` groups the positions of one legacy order;
+- `Kundennummer` links the order and every position to the customer;
+- every source row becomes its own `service_order_items` record with an
+  internal ULID and the complete raw source payload;
+- `Code`, `Artikelnummer`, `Bezeichnung`, and `Zusatztext` are evaluated
+  together to classify the position;
+- positions recognized as sold appliances create customer assets even when
+  `Seriennummer` is empty.
+
+Legacy order positions are not customer documents. The Documents workspace is
+reserved for actual uploaded files and generated service reports.
+
 ## Frontend
 
 ```bash

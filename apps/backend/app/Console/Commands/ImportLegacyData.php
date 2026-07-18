@@ -3,8 +3,6 @@
 namespace App\Console\Commands;
 
 use App\Models\Asset;
-use App\Models\CommercialDocument;
-use App\Models\CommercialDocumentLine;
 use App\Models\Customer;
 use App\Models\ImportRow;
 use App\Models\ImportRun;
@@ -13,6 +11,9 @@ use App\Models\Organization;
 use App\Models\ServiceArea;
 use App\Models\ServiceAreaPostalCode;
 use App\Models\ServiceLocation;
+use App\Models\ServiceOrder;
+use App\Models\ServiceOrderItem;
+use App\Support\Legacy\LegacyOrderLineClassifier;
 use App\Support\Legacy\LegacyTabFileReader;
 use Carbon\CarbonImmutable;
 use DateTimeInterface;
@@ -24,6 +25,14 @@ use Throwable;
 
 class ImportLegacyData extends Command
 {
+    /**
+     * The source file is grouped into orders in memory. Nummer is a grouping
+     * value only; database identity always comes from the model ULID.
+     *
+     * @var array<string, ServiceOrder>
+     */
+    private array $legacyOrders = [];
+
     protected $signature = 'legacy:import
         {directory : Directory containing Kunden.txt and lsArtikel.txt}
         {--organization= : Existing organization ULID or slug}
@@ -31,8 +40,10 @@ class ImportLegacyData extends Command
 
     protected $description = 'Import the current customer legacy export without discarding source values';
 
-    public function handle(LegacyTabFileReader $reader): int
-    {
+    public function handle(
+        LegacyTabFileReader $reader,
+        LegacyOrderLineClassifier $classifier,
+    ): int {
         $directory = rtrim((string) $this->argument('directory'), '/\\');
         $organization = $this->resolveOrganization();
 
@@ -64,15 +75,25 @@ class ImportLegacyData extends Command
             reader: $reader,
         );
 
+        $articlePath = $directory.DIRECTORY_SEPARATOR.'lsArtikel.txt';
+        if ($this->shouldImport(
+            $organization,
+            'service_order_items',
+            $articlePath,
+        )) {
+            $this->clearPreviousLegacyOrderImport($organization);
+        }
+
         $this->importFile(
             organization: $organization,
-            type: 'commercial_document_lines',
-            path: $directory.DIRECTORY_SEPARATOR.'lsArtikel.txt',
-            importer: fn (array $data, int $row, ImportRun $run) => $this->importArticleLine(
+            type: 'service_order_items',
+            path: $articlePath,
+            importer: fn (array $data, int $row, ImportRun $run) => $this->importOrderItem(
                 $organization,
                 $data,
                 $row,
                 $run,
+                $classifier,
             ),
             reader: $reader,
         );
@@ -328,123 +349,186 @@ class ImportLegacyData extends Command
     /**
      * @param  array<string, string>  $data
      */
-    private function importArticleLine(
+    private function importOrderItem(
         Organization $organization,
         array $data,
         int $sourceRow,
         ImportRun $run,
+        LegacyOrderLineClassifier $classifier,
     ): void {
-        $documentNumber = $data['Nummer'];
+        $legacyNumber = $data['Nummer'];
         $customerNumber = $data['Kundennummer'];
         $customer = Customer::query()
             ->where('organization_id', $organization->id)
             ->where('legacy_customer_number', $customerNumber)
             ->first();
 
-        if ($documentNumber === '') {
-            throw new \RuntimeException('Document number is empty.');
+        if ($legacyNumber === '') {
+            throw new \RuntimeException('Nummer is empty.');
         }
 
-        $warnings = [];
         if ($customer === null) {
-            $warnings[] = 'Referenced customer was not found.';
-        }
-
-        $document = CommercialDocument::query()->updateOrCreate(
-            [
-                'organization_id' => $organization->id,
-                'legacy_document_number' => $documentNumber,
-            ],
-            [
-                'customer_id' => $customer?->id,
-                'document_number' => $documentNumber,
-                'type' => 'unclassified',
-                'document_date' => $this->parseDate($data['Datum']),
-                'legacy_data' => [
-                    'source' => 'lsArtikel.txt',
-                    'customer_number' => $customerNumber,
-                ],
-            ],
-        );
-
-        $lineNumber = CommercialDocumentLine::query()
-            ->where('commercial_document_id', $document->id)
-            ->where('legacy_data->source_row', $sourceRow)
-            ->value('line_number');
-        $created = $lineNumber === null;
-        $lineNumber ??= CommercialDocumentLine::query()
-            ->where('commercial_document_id', $document->id)
-            ->max('line_number') + 1;
-
-        $line = CommercialDocumentLine::query()->updateOrCreate(
-            [
-                'commercial_document_id' => $document->id,
-                'line_number' => $lineNumber,
-            ],
-            [
-                'organization_id' => $organization->id,
-                'legacy_art' => $data['Art'] ?: null,
-                'article_number' => $data['Artikelnummer'] ?: null,
-                'code' => $data['Code'] ?: null,
-                'description' => $data['Bezeichnung'] ?: null,
-                'additional_text' => $data['Zusatztext'] ?: null,
-                'quantity' => $this->parseDecimal($data['Anzahl']),
-                'net_unit_price' => $this->parseDecimal($data['Einzelpreis']),
-                'gross_unit_price' => $this->parseDecimal($data['Bruttoeinzelpreis']),
-                'serial_number' => $data['Seriennummer'] ?: null,
-                'classification' => 'unclassified',
-                'legacy_data' => [
-                    ...$data,
-                    'source_row' => $sourceRow,
-                ],
-            ],
-        );
-
-        if ($customer !== null && $data['Seriennummer'] !== '') {
-            $locationId = ServiceLocation::query()
-                ->where('customer_id', $customer->id)
-                ->where('is_primary', true)
-                ->value('id');
-
-            Asset::query()->updateOrCreate(
-                [
-                    'organization_id' => $organization->id,
-                    'customer_id' => $customer->id,
-                    'serial_number' => $data['Seriennummer'],
-                ],
-                [
-                    'service_location_id' => $locationId,
-                    'model' => $data['Bezeichnung'] ?: null,
-                    'purchase_date' => $this->parseDate($data['Datum']),
-                    'status' => 'active',
-                    'legacy_article_id' => $data['Artikelnummer'] ?: null,
-                    'legacy_data' => $data,
-                ],
+            throw new \RuntimeException(
+                "Kundennummer {$customerNumber} was not found.",
             );
         }
 
-        ImportRow::query()->updateOrCreate(
+        $locationId = ServiceLocation::query()
+            ->where('customer_id', $customer->id)
+            ->orderByDesc('is_primary')
+            ->value('id');
+        if ($locationId === null) {
+            throw new \RuntimeException(
+                "Kundennummer {$customerNumber} has no service location.",
+            );
+        }
+
+        $order = $this->legacyOrders[$legacyNumber] ?? null;
+        if ($order === null) {
+            $lineDate = $this->parseDate($data['Datum']);
+            $timestamp = $lineDate
+                ? CarbonImmutable::parse($lineDate)->startOfDay()
+                : now();
+            $order = ServiceOrder::query()->create([
+                'organization_id' => $organization->id,
+                'order_number' => $legacyNumber,
+                'legacy_order_number' => $legacyNumber,
+                'customer_id' => $customer->id,
+                'service_location_id' => $locationId,
+                'source' => 'legacy',
+                'priority' => 'normal',
+                'status' => 'completed',
+                'fault_description' => 'Historischer Auftrag',
+                'dispatcher_notes' => 'Aus lsArtikel.txt übernommen.',
+                'preferred_date' => $lineDate,
+                'closed_at' => $timestamp,
+                'created_at' => $timestamp,
+                'updated_at' => $timestamp,
+            ]);
+            $this->legacyOrders[$legacyNumber] = $order;
+        } elseif ($order->customer_id !== $customer->id) {
+            throw new \RuntimeException(
+                "Nummer {$legacyNumber} references more than one customer.",
+            );
+        }
+
+        $classification = $classifier->classify($data);
+        $lineDate = $this->parseDate($data['Datum']);
+        $timestamp = $lineDate
+            ? CarbonImmutable::parse($lineDate)->startOfDay()
+            : now();
+        $item = ServiceOrderItem::query()->create([
+            'organization_id' => $organization->id,
+            'service_order_id' => $order->id,
+            'customer_id' => $customer->id,
+            'source_row' => $sourceRow,
+            'legacy_art' => $data['Art'] ?: null,
+            'legacy_number' => $legacyNumber,
+            'article_number' => $data['Artikelnummer'] ?: null,
+            'code' => $data['Code'] ?: null,
+            'line_date' => $lineDate,
+            'description' => $data['Bezeichnung'] ?: null,
+            'additional_text' => $data['Zusatztext'] ?: null,
+            'quantity' => $this->parseDecimal($data['Anzahl']),
+            'net_unit_price' => $this->parseDecimal($data['Einzelpreis']),
+            'gross_unit_price' => $this->parseDecimal($data['Bruttoeinzelpreis']),
+            'serial_number' => $data['Seriennummer'] ?: null,
+            'legacy_customer_number' => $customerNumber,
+            'classification' => $classification['classification'],
+            'classification_confidence' => $classification['confidence'],
+            'classification_reason' => $classification['reason'],
+            'device_type' => $classification['device_type'],
+            'legacy_data' => $data,
+            'created_at' => $timestamp,
+            'updated_at' => $timestamp,
+        ]);
+
+        if ($classification['classification'] === 'device') {
+            Asset::query()->create([
+                'organization_id' => $organization->id,
+                'customer_id' => $customer->id,
+                'service_location_id' => $locationId,
+                'source_order_item_id' => $item->id,
+                'model' => $data['Bezeichnung'] ?: null,
+                'serial_number' => $data['Seriennummer'] ?: null,
+                'purchase_date' => $lineDate,
+                'status' => 'active',
+                'legacy_article_id' => $data['Artikelnummer'] ?: null,
+                'custom_attributes' => [
+                    'legacy_number' => $legacyNumber,
+                    'code' => $data['Code'] ?: null,
+                    'device_type' => $classification['device_type'],
+                    'classification_confidence' => $classification['confidence'],
+                ],
+                'legacy_data' => $data,
+                'notes' => $data['Zusatztext'] ?: null,
+                'created_at' => $timestamp,
+                'updated_at' => $timestamp,
+            ]);
+        }
+
+        ImportRow::query()->create(
             [
                 'import_run_id' => $run->id,
                 'source_row' => $sourceRow,
-            ],
-            [
                 'organization_id' => $organization->id,
-                'source_key' => $documentNumber,
-                'status' => $warnings === [] ? ($created ? 'created' : 'updated') : 'warning',
-                'entity_type' => CommercialDocumentLine::class,
-                'entity_id' => $line->id,
+                'source_key' => $legacyNumber,
+                'status' => 'created',
+                'entity_type' => ServiceOrderItem::class,
+                'entity_id' => $item->id,
                 'raw_data' => $data,
-                'warnings' => $warnings ?: null,
+                'warnings' => null,
                 'error' => null,
             ],
         );
 
-        $counter = $created ? 'created_rows' : 'updated_rows';
-        $run->{$counter}++;
-        if ($warnings !== []) {
-            $run->warning_rows++;
+        $run->created_rows++;
+    }
+
+    private function shouldImport(
+        Organization $organization,
+        string $type,
+        string $path,
+    ): bool {
+        if ($this->option('force')) {
+            return true;
         }
+
+        return ! ImportRun::query()
+            ->where('organization_id', $organization->id)
+            ->where('source_type', $type)
+            ->where('source_hash', hash_file('sha256', $path))
+            ->where('status', 'completed')
+            ->exists();
+    }
+
+    private function clearPreviousLegacyOrderImport(
+        Organization $organization,
+    ): void {
+        $legacyOrderIds = ServiceOrder::query()
+            ->where('organization_id', $organization->id)
+            ->where('source', 'legacy')
+            ->pluck('id');
+
+        Asset::query()
+            ->where('organization_id', $organization->id)
+            ->whereHas('sourceOrderItem', fn ($builder) => $builder
+                ->whereIn('service_order_id', $legacyOrderIds))
+            ->delete();
+        ServiceOrder::query()
+            ->whereIn('id', $legacyOrderIds)
+            ->delete();
+
+        ImportRun::query()
+            ->where('organization_id', $organization->id)
+            ->where('source_type', 'service_order_items')
+            ->get()
+            ->each(function (ImportRun $run): void {
+                $run->rows()->delete();
+                $run->delete();
+            });
+
+        $this->legacyOrders = [];
     }
 
     /**

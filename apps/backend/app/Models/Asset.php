@@ -37,4 +37,9 @@ class Asset extends Model
     {
         return $this->belongsTo(ServiceLocation::class);
     }
+
+    public function sourceOrderItem(): BelongsTo
+    {
+        return $this->belongsTo(ServiceOrderItem::class, 'source_order_item_id');
+    }
 }

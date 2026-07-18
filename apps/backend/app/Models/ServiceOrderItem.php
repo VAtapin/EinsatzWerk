@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-class CommercialDocument extends Model
+class ServiceOrderItem extends Model
 {
     use HasUlids;
 
@@ -16,9 +16,17 @@ class CommercialDocument extends Model
     protected function casts(): array
     {
         return [
-            'document_date' => 'date',
+            'line_date' => 'date',
+            'quantity' => 'decimal:4',
+            'net_unit_price' => 'decimal:4',
+            'gross_unit_price' => 'decimal:4',
             'legacy_data' => 'array',
         ];
+    }
+
+    public function serviceOrder(): BelongsTo
+    {
+        return $this->belongsTo(ServiceOrder::class);
     }
 
     public function customer(): BelongsTo
@@ -26,8 +34,8 @@ class CommercialDocument extends Model
         return $this->belongsTo(Customer::class);
     }
 
-    public function lines(): HasMany
+    public function assets(): HasMany
     {
-        return $this->hasMany(CommercialDocumentLine::class);
+        return $this->hasMany(Asset::class, 'source_order_item_id');
     }
 }

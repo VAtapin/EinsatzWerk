@@ -4,8 +4,8 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\Asset;
-use App\Models\CommercialDocument;
 use App\Models\Customer;
+use App\Models\CustomerDocument;
 use App\Models\Organization;
 use App\Models\Product;
 use App\Models\ServiceArea;
@@ -90,12 +90,21 @@ class OfficeWorkspaceController extends Controller
                     ->orWhereLike('serial_number', $like)
                     ->orWhereLike('production_number', $like)
                     ->orWhereLike('legacy_article_id', $like)
+                    ->orWhereHas('sourceOrderItem', fn ($item) => $item
+                        ->whereLike('legacy_number', $like)
+                        ->orWhereLike('code', $like)
+                        ->orWhereLike('additional_text', $like))
                     ->orWhereHas('customer', fn ($customer) => $customer
                         ->whereLike('first_name', $like)
                         ->orWhereLike('last_name', $like)
                         ->orWhereLike('company_name', $like)));
             })
-            ->with(['customer', 'serviceLocation', 'manufacturer'])
+            ->with([
+                'customer',
+                'serviceLocation',
+                'manufacturer',
+                'sourceOrderItem.serviceOrder:id,order_number',
+            ])
             ->latest()
             ->limit(100)
             ->get();
@@ -287,11 +296,10 @@ class OfficeWorkspaceController extends Controller
         $organizationId = $request->user()->organization_id;
 
         return response()->json(['data' => [
-            'commercial' => CommercialDocument::query()
+            'customer' => CustomerDocument::query()
                 ->where('organization_id', $organizationId)
                 ->with('customer:id,first_name,last_name,company_name')
-                ->withCount('lines')
-                ->latest('document_date')
+                ->latest()
                 ->limit(100)
                 ->get(),
             'service' => VisitDocument::query()
@@ -301,6 +309,20 @@ class OfficeWorkspaceController extends Controller
                 ->limit(100)
                 ->get(),
         ]]);
+    }
+
+    public function downloadCustomerDocument(
+        Request $request,
+        string $customerDocument,
+    ): StreamedResponse {
+        $document = CustomerDocument::query()
+            ->where('organization_id', $request->user()->organization_id)
+            ->findOrFail($customerDocument);
+
+        return Storage::disk($document->disk)->download(
+            $document->path,
+            $document->name,
+        );
     }
 
     public function downloadServiceDocument(
